@@ -1,0 +1,18 @@
+{
+  "name": "jarvis-ai",
+  "version": "1.0.10",
+  "description": "Jarvis \u2014 personal AI assistant (dark-HUD fork of the MAX AI codebase; full feature parity, independent product): hub service, web companion (PWA), and ESP32 satellite firmware.",
+  "private": true,
+  "main": "hub/server.js",
+  "scripts": {
+    "start": "node hub/server.js",
+    "start:supervised": "bash scripts/supervisor.sh",
+    "dev": "node --watch hub/server.js",
+    "check": "node tools/check.js",
+    "test": "node tools/check.js && node tools/test-hl.js && node tools/test-apps.js && node tools/test-keyring.js && node tools/test-security.js && node tools/test-offline.js && node tools/test-backup.js && node tools/test-redteam.js && node tools/test-chaos.js && node tools/test-privacy.js && node tools/test-injection.js && node tools/test-physical.js && node tools/test-systems.js && node tools/test-features.js && node tools/test-lean.js && node tools/test-learn-models.js && node tools/test-diagnose.js && node tools/test-modelroute.js && node tools/test-persona.js && node tools/test-openers.js && node tools/test-regress.js && node tools/test-github.js && node tools/test-seams.js && node tools/test-jarvis.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
