@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jarvis — Logs &amp; Health</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/theme.css">
+</head>
+<body>
+<div class="glow-field" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="wordmark" href="index.html">JARVIS</a>
+  <span class="spacer"></span>
+  <a class="navlink" href="index.html">Talk</a>
+  <a class="navlink" href="vision.html">Vision</a>
+  <!-- nav normalized -->
+  <a class="navlink active" href="logs.html">Logs</a>
+  <a class="navlink" href="systems.html">Systems</a>
+  <a class="navlink" href="settings.html">Settings</a>
+</header>
+
+<main class="panel">
+  <h1 style="font-size:22px;letter-spacing:3px;margin-bottom:4px">Logs &amp; Health</h1>
+  <p class="hint" style="margin-bottom:18px">Private, on-hub analytics. Raw transcripts are never logged. Owner only.</p>
+
+  <div class="grid">
+    <section class="card" aria-labelledby="l-summary">
+      <h3 id="l-summary">Last 24 hours</h3>
+      <div class="big" id="usageCount">–</div>
+      <div class="muted" id="usageLine">—</div>
+    </section>
+
+    <section class="card" aria-labelledby="l-system">
+      <h3 id="l-system">System health</h3>
+      <ul id="sysList"><li class="muted">Loading…</li></ul>
+    </section>
+
+    <section class="card" aria-labelledby="l-hours">
+      <h3 id="l-hours">Activity by hour</h3>
+      <div class="bars" id="hourBars" role="img" aria-label="Interactions per hour chart"></div>
+      <div class="barlabel">0 → 23 (hour of day)</div>
+    </section>
+
+    <section class="card" aria-labelledby="l-skills">
+      <h3 id="l-skills">Skill success rates</h3>
+      <table class="mini" id="skillTable">
+        <thead><tr><th>Skill</th><th>OK</th><th>Fail</th><th>Rate</th></tr></thead>
+        <tbody><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </section>
+
+    <section class="card" aria-labelledby="l-alerts" style="grid-column:1/-1">
+      <h3 id="l-alerts">Security alerts</h3>
+      <div id="alertState" class="muted">Checking…</div>
+      <ul id="alertList"></ul>
+      <p class="desc" style="margin-top:8px">Jarvis auto-locks sensitive actions (~15 min) after 5 failed voice verifications or 8 privileged denials in 10 min. Set <code class="inline">MAX_ALERT_WEBHOOK</code> to get lockdown alerts off-device.</p>
+    </section>
+
+    <section class="card" aria-labelledby="l-errors" style="grid-column:1/-1">
+      <h3 id="l-errors">Recent errors</h3>
+      <ul id="errList"><li class="muted">None — smooth sailing.</li></ul>
+    </section>
+  </div>
+</main>
+
+<script src="js/common.js"></script>
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  try {
+    const s = await MAX.get('/api/logs/summary?hours=24');
+    $('usageCount').textContent = s.interactions;
+    $('usageLine').textContent = `${s.ok} ok · ${s.fail} failed`;
+
+    const sys = s.system;
+    $('sysList').innerHTML = `
+      <li>Network: <b class="${sys.online ? 'pill-ok' : 'pill-bad'}">${sys.online ? 'online' : 'offline — local fallback'}</b></li>
+      <li>Uptime: ${Math.floor(sys.uptime / 3600)}h ${Math.floor((sys.uptime % 3600) / 60)}m</li>
+      <li>Memory: ${sys.memMB} MB · Node ${sys.node} · v${sys.version}</li>
+      <li>Satellites: ${sys.satellites.length ? sys.satellites.map((x) => `${x.name} (${x.online ? 'on' : 'off'})`).join(', ') : 'none'}</li>`;
+
+    const max = Math.max(1, ...Object.values(s.byHour));
+    $('hourBars').innerHTML = Array.from({ length: 24 }, (_, h) => {
+      const n = s.byHour[h] || 0;
+      return `<div class="barcol" style="height:${(n / max) * 100}%" title="${h}:00 — ${n}"></div>`;
+    }).join('');
+
+    const rows = Object.entries(s.bySkill);
+    document.querySelector('#skillTable tbody').innerHTML = rows.length
+      ? rows.map(([name, r]) => {
+          const t = r.ok + r.fail;
+          const rate = t ? Math.round((r.ok / t) * 100) : 100;
+          return `<tr><td>${name}</td><td class="pill-ok">${r.ok}</td><td class="${r.fail ? 'pill-bad' : ''}">${r.fail}</td><td>${rate}%</td></tr>`;
+        }).join('')
+      : '<tr><td colspan="4" class="muted">No skill activity yet.</td></tr>';
+
+    $('errList').innerHTML = s.errors.length
+      ? s.errors.map((e) => `<li><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> ${e.skill ? `<b>${e.skill}</b> — ` : ''}${e.message || e.type}</li>`).join('')
+      : '<li class="muted">None — smooth sailing.</li>';
+  } catch (e) {
+    $('usageLine').textContent = 'Hub unreachable: ' + e.message;
+  }
+  try {
+    const a = await MAX.get('/api/alerts?hours=24');
+    const total = Object.values(a.counts).reduce((s, n) => s + n, 0);
+    $('alertState').innerHTML = a.firing
+      ? '<b class="pill-bad">Lockdown active</b> — sensitive actions are frozen. See below.'
+      : total
+        ? `<span class="pill-bad">${total} security-relevant event${total === 1 ? '' : 's'} in 24 h.</span>`
+        : '<span class="pill-ok">Quiet — no security events in 24 h.</span>';
+    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    $('alertList').innerHTML = a.recent.length
+      ? a.recent.map((e) => `<li><span class="muted">${new Date(e.ts).toLocaleTimeString()} — ${esc(e.type)}</span>${e.user ? ' · ' + esc(e.user) : ''}${e.message || e.reason ? ' · ' + esc(e.message || e.reason) : ''}</li>`).join('')
+      : '<li class="muted">Nothing to report.</li>';
+  } catch { $('alertState').textContent = 'Alerts unavailable.'; }
+})();
+</script>
+</body>
+</html>
