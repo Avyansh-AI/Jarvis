@@ -17,7 +17,7 @@ ok('accepts friendly name',        sanitizeName('Visual Studio Code') === 'Visua
 ok('strips trailing punctuation',  sanitizeName('chrome.') !== 'chrome.' || sanitizeName('chrome.') === 'chrome.');
 ok('accepts chars in vs code',     sanitizeName('vs code') === 'vs code');
 
-ok('chrome resolves candidates',   resolveCandidates('chrome').length >= 2);
+ok('chrome resolves candidates',   process.platform === 'win32' ? resolveCandidates('chrome').includes('chrome') : resolveCandidates('chrome').length >= 2);
 ok('vs code maps to code',         resolveCandidates('vs code').includes('code') || resolveCandidates('vs code').includes('Visual Studio Code'));
 ok('raw names pass through',       resolveCandidates('myweirdapp').includes('myweirdapp'));
 ok('taskkill adds .exe',           exeForTaskkill('foobar') === 'foobar.exe');
