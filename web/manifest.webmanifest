@@ -1,0 +1,20 @@
+{
+  "name": "Jarvis",
+  "short_name": "Jarvis",
+  "description": "Personal AI companion — voice, home, and hardware, with privacy-first defaults.",
+  "start_url": "index.html",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#02060E",
+  "theme_color": "#04101F",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Talk to Jarvis", "url": "index.html" },
+    { "name": "Dashboard", "url": "dashboard.html" },
+    { "name": "SOS", "url": "index.html?sos=1" }
+  ]
+}

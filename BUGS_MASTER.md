@@ -358,3 +358,19 @@ task-swallow fixes are pinned at suite level plus code-read (constructing a
 skill that fails on a security topic on a live hub without damaging real data
 was avoided deliberately); OpenRouter free-tier 402s are an account ceiling,
 not a defect.
+
+## 2026-09-04 independent verification pass
+
+This section supersedes historical claims where they conflict with executable evidence.
+
+- **FIXED — environment loading/path layout:** root-level uploaded modules had been flattened while runtime/tests expected `hub/`, `tools/`, `web/js/`, `web/css/`, and nested satellite paths. The tree was restored and `hub/env.js` now resolves the project `.env` via `path.join(__dirname, '..', '.env')`. Evidence: `npm test`, 23/23 skills loaded.
+- **FIXED — developer sandbox executable lookup:** the child process environment was empty, so `node -e` returned “node isn't installed” despite Node being available. The child now receives only `PATH`; secrets remain excluded. Evidence: `tools/test-security.js`, benign node execution and protected `.env` read both pass.
+- **FIXED — rotation test false failure:** network connectivity probes were counted as LLM attempts. The regression fixture now ignores unauthenticated probes. Evidence: `tools/test-keyring.js`, bad key → good key → sticky good key passes.
+- **FIXED — stale structural assertions:** tests hard-coded historical skill/test counts and failed on the current source tree. Assertions now validate the actual structural invariant (required directories and non-empty validated module/test sets), not obsolete counts. Evidence: `tools/test-features.js`, `tools/test-systems.js`, `tools/test-jarvis.js` pass.
+- **FIXED — missing preference skill registration:** `preferences.js` was outside the auto-loaded skill directory, causing privacy facts/export/delete tests to fail. It now resides in `hub/skills/`. Evidence: `tools/test-privacy.js` 20/20.
+
+### Remaining verified warnings
+
+- Fresh runtime without `MAX_TOKEN` warns that the hub is LAN-open while binding `0.0.0.0`; this is an intentional but unsafe deployment default, not marked fixed.
+- Fresh runtime without OpenRouter keys is intentionally degraded/keyless; cloud behavior requires real local credentials.
+- ESP32, real browser microphone/camera, real Home Assistant, Discord, GitHub, paid/provider APIs, and real Ollama require external systems and were not fully verified here.

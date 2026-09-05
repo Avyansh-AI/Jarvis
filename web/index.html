@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#04101F">
+<title>Jarvis</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/theme.css">
+<style>
+  body { display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; padding: 24px; min-height: 100vh; }
+  .stage { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; }
+  .dock { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .chat { display: none; flex-direction: column; align-items: center; gap: 10px; width: min(560px, 100%); }
+  .chat.open { display: flex; }
+  .chat .composer { display: flex; gap: 8px; width: 100%; }
+  .chat input[type=text] { flex: 1; font: inherit; font-size: 14px; font-weight: 600; color: var(--ink); background: rgba(4, 16, 31, 0.85); border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; outline: none; }
+  .chat input[type=text]:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(60,224,255,0.16); }
+  .vision-drawer { position: fixed; right: 18px; bottom: 18px; width: min(320px, 86vw); z-index: 50; display: none; }
+  .vision-drawer.open { display: block; }
+  .verify-drawer { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 70; display: none; width: min(340px, 90vw); text-align: center; }
+  .verify-drawer.open { display: block; }
+  .sos-fab { position: fixed; left: 18px; bottom: 18px; z-index: 50; }
+  @media (max-width: 560px) { .vision-drawer { right: 8px; bottom: 8px; } .sos-fab { left: 8px; bottom: 8px; } }
+</style>
+</head>
+<body>
+
+<div class="glow-field" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="wordmark" href="index.html">JARVIS</a>
+  <span class="chip" id="hubChip" role="status"><span class="semi-dot"></span><span id="hubChipText">hub</span></span>
+  <span class="chip" id="micChip" aria-label="microphone status"><span class="semi-dot"></span>mic</span>
+  <span class="chip cam" id="camChip" aria-label="camera status"><span class="semi-dot"></span>cam</span>
+  <span class="spacer"></span>
+  <a class="navlink" href="vision.html">Vision</a>
+  <a class="navlink" href="logs.html">Logs</a>
+  <a class="navlink" href="meeting.html">Meetings</a>
+  <a class="navlink" href="systems.html">Systems</a>
+  <a class="navlink" href="settings.html">Settings</a>
+</header>
+
+<!-- need banner: when something isn't working, SAY WHY (never a silent offline ring) -->
+<div class="need-banner" id="needBanner" role="status" aria-live="polite" hidden>
+  <span class="nb-dot" aria-hidden="true"></span>
+  <span id="needBannerText"></span>
+  <a class="nb-link" href="systems.html">Systems&nbsp;▸</a>
+  <button class="nb-x" id="needBannerX" type="button" aria-label="Dismiss">✕</button>
+</div>
+
+<div class="stage">
+  <button class="ring-wrap standby" id="ringWrap" aria-pressed="false" aria-label="Talk to Jarvis">
+    <svg viewBox="0 0 260 300" aria-hidden="true">
+      <ellipse class="ring-outline" cx="130" cy="150" rx="100" ry="120" />
+      <ellipse class="core-fill" cx="130" cy="150" rx="100" ry="120" />
+      <ellipse class="ring-glow" cx="130" cy="150" rx="100" ry="120" />
+    </svg>
+    <div class="core-label" aria-hidden="true">JARVIS</div>
+    <div class="voice-bars" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+    <div class="status-pill" id="statusPill" aria-hidden="true"><span class="dot"></span><span id="statusText">STANDBY</span></div>
+  </button>
+
+  <div class="status-line" id="statusLine" role="status" aria-live="polite">All systems nominal.</div>
+  <div class="transcript-line" id="transcriptLine" aria-live="polite"></div>
+
+  <div class="chat" id="chatPanel">
+    <div class="chat-log" id="chatLog"></div>
+    <form class="composer" id="chatForm">
+      <input type="text" id="chatInput" autocomplete="off" placeholder="Type to Jarvis… (Enter to send)" aria-label="Type a message to Jarvis">
+      <button class="btn primary" type="submit">Send</button>
+    </form>
+  </div>
+
+  <div class="dock">
+    <button class="btn ghost" id="wakeBtn" aria-pressed="false" title="Hands-free mode">Hey&nbsp;Jarvis&nbsp;○</button>
+    <button class="btn ghost" id="typeBtn" aria-pressed="false" title="Text-only mode">Type&nbsp;instead</button>
+    <button class="btn ghost" id="visionBtn" aria-pressed="false" title="Camera vision (opt-in, opens Vision page)">Vision</button>
+    <button class="btn ghost" id="hudBtn" aria-pressed="true" title="HUD widget layer (weather, time, devices, activity)">HUD&nbsp;●</button>
+  </div>
+  <div class="hint">Tap or press Enter to talk · camera/mic stay off until you enable them</div>
+</div>
+
+<!-- Jarvis HUD widget layer: modular glass panels arranged around the ring.
+     Data comes from existing public APIs only (see js/widgets.js). -->
+<div class="hud-layer" id="hudLayer" aria-label="Status widgets">
+  <div class="hud-widget tl" data-widget="weather" role="status" aria-label="Weather"></div>
+  <div class="hud-widget tr" data-widget="clock" role="status" aria-label="Date and time"></div>
+  <div class="hud-widget bl" data-widget="activity" role="status" aria-label="Recent activity and notifications"></div>
+  <div class="hud-widget br" data-widget="devices" role="status" aria-label="Quick device controls"></div>
+</div>
+
+<div class="card verify-drawer" id="verifyDrawer" role="alertdialog" aria-labelledby="verifyTitle">
+  <h3 id="verifyTitle">Voice verification</h3>
+  <p class="muted" id="verifyText">This action is sensitive. Say your passphrase after the tone…</p>
+  <div class="ring-wrap" style="width:60px;height:70px;margin:10px auto" aria-hidden="true">
+    <svg viewBox="0 0 260 300"><ellipse class="ring-glow" cx="130" cy="150" rx="100" ry="120"></ellipse></svg>
+  </div>
+  <div class="row" style="justify-content:center">
+    <button class="btn ghost" id="verifyCancel">Cancel</button>
+  </div>
+</div>
+
+<footer class="sos-fab"><button class="btn danger" id="sosBtn">SOS</button></footer>
+
+<script src="js/common.js"></script>
+<script src="js/wakeword.js"></script>
+<script src="js/widgets.js"></script>
+<script>
+(() => {
+  const ringWrap = document.getElementById('ringWrap');
+  const statusText = document.getElementById('statusText');
+  const statusLine = document.getElementById('statusLine');
+  const transcriptLine = document.getElementById('transcriptLine');
+  const hubChip = document.getElementById('hubChip');
+  const hubChipText = document.getElementById('hubChipText');
+  const micChip = document.getElementById('micChip');
+  const camChip = document.getElementById('camChip');
+
+  /* ---------- extended state machine ---------- */
+  const ALL = ['standby','listening','thinking','speaking','vision','alert','offline','error'];
+  const STATES = {
+    standby:   { pill: 'STANDBY',   line: 'All systems nominal.' },
+    listening: { pill: 'LISTENING', line: "I'm listening…" },
+    thinking:  { pill: 'THINKING',  line: 'Let me think about that…' },
+    speaking:  { pill: 'SPEAKING',  line: '' },
+    vision:    { pill: 'VISION',    line: 'Camera is on. Watching for gestures.' },
+    alert:     { pill: 'ALERT',     line: 'Emergency alert active.' },
+    offline:   { pill: 'OFFLINE',   line: 'Hub unreachable — local fallback only.' },
+    error:     { pill: 'ERROR',     line: 'Something slipped — one moment.' },
+  };
+  /* Jarvis persona: in the Jarvis fork this IS the product voice — on unless
+     explicitly switched off in Settings ("Jarvis mode"). */
+  if (MAX.LS.get('jarvis', true)) {
+    STATES.standby.line = 'At your service.';
+    STATES.thinking.line = 'Working on it…';
+    STATES.speaking.line = '';
+  }
+  let state = 'standby';
+  let alertActive = false;
+  let errorTimer = null;
+
+  function setState(next, lineOverride) {
+    ringWrap.classList.remove(...ALL);
+    ringWrap.classList.add(next);
+    ringWrap.setAttribute('aria-pressed', next === 'listening' ? 'true' : 'false');
+    statusText.textContent = STATES[next].pill;
+    statusLine.textContent = lineOverride ?? STATES[next].line;
+    state = next;
+  }
+  function flashError(line) {
+    clearTimeout(errorTimer);
+    setState('error', line || STATES.error.line);
+    errorTimer = setTimeout(() => { if (state === 'error') setState('standby'); }, 1600);
+  }
+
+  function spawnRipple() {
+    const rect = ringWrap.getBoundingClientRect();
+    const size = Math.max(rect.width, rect.height);
+    const ripple = document.createElement('span');
+    ripple.className = 'ripple';
+    ripple.style.width = ripple.style.height = size + 'px';
+    ripple.style.left = (rect.width / 2 - size / 2) + 'px';
+    ripple.style.top = (rect.height / 2 - size / 2) + 'px';
+    ringWrap.appendChild(ripple);
+    ripple.addEventListener('animationend', () => ripple.remove());
+  }
+
+  /* ---------- hub connection ---------- */
+  let ws = null, wsOpen = false, reconnectTimer = null;
+  let pendingVerifyUtterance = null;
+
+  /* Jarvis mode (opt-in, Settings): time-of-day greeting + a status-aware
+     first line each session, so "what's blocking what" is heard, not hidden. */
+  let jarvisGreeted = false;
+  try { jarvisGreeted = sessionStorage.getItem('maxGreeted') === '1'; } catch {}
+  function jarvisGreet() {
+    if (!MAX.LS.get('jarvis', true) || jarvisGreeted) return;
+    jarvisGreeted = true;
+    try { sessionStorage.setItem('maxGreeted', '1'); } catch {}
+    const h = new Date().getHours();
+    const tod = h < 5 ? 'Working late, I see' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+    MAX.get('/api/status').then((S) => {
+      const needs = (S && S.needs) || [];
+      const blocked = needs.filter((n) => n.severity === 'blocked');
+      const notes = needs.length - blocked.length;
+      let line;
+      if (blocked.length) {
+        line = `${tod}. ${blocked.length} system${blocked.length > 1 ? 's' : ''} need${blocked.length > 1 ? '' : 's'} attention.`;
+        toast(line + ' ' + blocked[0].what, [{ label: 'Open Systems', fn: () => { location.href = 'systems.html'; } }]);
+      } else if (notes > 0) {
+        line = `${tod}. Operational — ${notes} note${notes > 1 ? 's' : ''} waiting on the Systems page.`;
+        toast(line, [{ label: 'Open Systems', fn: () => { location.href = 'systems.html'; } }]);
+      } else line = `${tod}. All systems nominal.`;
+      if (state === 'standby' || state === 'offline') setState('standby', line);
+      speak(line, {});
+    }).catch(() => { if (state === 'standby') setState('standby', tod + '.'); });
+  }
+
+  /* Daily briefing on first connect of the day (opt-in, Settings → startup briefing). */
+  function maybeStartupBriefing() {
+    const today = new Date().toISOString().slice(0, 10);
+    if (MAX.LS.get('briefedOn', '') === today) return;
+    MAX.get('/api/settings').then((st) => {
+      if (!st.features || !st.features.startupBriefing) return;
+      MAX.LS.set('briefedOn', today);
+      setState('thinking');
+      sendUtterance('give me my daily briefing');
+    }).catch(() => {});
+  }
+
+  function hubOnline(online) {
+    hubChip.classList.toggle('on', online);
+    hubChipText.textContent = online ? 'hub' : 'offline';
+    if (!online && state !== 'listening' && !alertActive) setState('offline');
+    if (online && state === 'offline') setState('standby', 'Back online. All systems nominal.');
+    if (online) { jarvisGreet(); setTimeout(maybeStartupBriefing, 2500); refreshNeeds(); }
+    else renderNeeds('off', [OFFLINE_COPY]);
+  }
+
+  function connect() {
+    try { ws = new WebSocket(MAX.wsUrl('/ws/app')); } catch { scheduleReconnect(); return; }
+    ws.onopen = () => { wsOpen = true; hubOnline(true); };
+    ws.onclose = () => { wsOpen = false; hubOnline(false); scheduleReconnect(); };
+    ws.onerror = () => { try { ws.close(); } catch {} };
+    ws.onmessage = (e) => {
+      let msg; try { msg = JSON.parse(e.data); } catch { return; }
+      if (msg.type === 'hello') hubOnline(true);
+      else if (msg.type === 'state' && msg.state === 'thinking' && state === 'listening') setState('thinking');
+      else if (msg.type === 'response') { clearTimeout(replyWatchdog); handleResponse(msg); }
+      else if (msg.type === 'notify') handleNotify(msg);
+      else if (msg.type === 'alert') { alertActive = true; setState('alert', msg.label); toast(msg.label, [{ label: 'Stand down', fn: cancelSOS }]); speak(msg.label, {}); }
+      else if (msg.type === 'net' && msg.online === false) hubOnline(true); // app-level: hub alive, WAN down
+    };
+  }
+  function scheduleReconnect() { clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, 4000); }
+
+  let replyWatchdog = null;
+  async function sendUtterance(text, extra = {}) {
+    if (!text.trim()) return;
+    setState('thinking');
+    if (wsOpen) {
+      try { ws.send(JSON.stringify({ type: 'utterance', text, ...extra })); }
+      catch { wsOpen = false; } // dead socket — fall through to HTTP
+      if (wsOpen) {
+        // a half-open socket can swallow the message silently; if no reply
+        // arrives, retry once over HTTP so the user is never left hanging
+        clearTimeout(replyWatchdog);
+        replyWatchdog = setTimeout(() => {
+          toast('No reply heard — retrying…');
+          MAX.post('/api/utterance', { text, user: MAX.user(), ...extra })
+            .then(handleResponse)
+            .catch(() => flashError('Hub unreachable — try again.'));
+        }, 15000);
+        return;
+      }
+    }
+    try {
+      const out = await MAX.post('/api/utterance', { text, user: MAX.user(), ...extra });
+      handleResponse(out);
+    } catch (e) { flashError('Hub unreachable — try again.'); }
+  }
+
+  function handleResponse(res) {
+    if (res.open) { // the "terminal" intent — the one and only auto-navigation (user-requested)
+      addBubble('max', res.say, res.cards);
+      speak(stripCodeForSpeech(res.say), {});
+      const target = String(res.open).replace(/[^a-z0-9.\-]/gi, ''); // local page names only
+      if (target) setTimeout(() => { location.href = target; }, 700);
+      return;
+    }
+    if (res.verify) {
+      pendingVerifyUtterance = res._original || lastUserText;
+      openVerify(res.say);
+      return;
+    }
+    if (res.error) { flashError(res.say); speak(res.say, {}); return; }
+    if (res.offline) hubChipText.textContent = 'local mode';
+    addBubble('max', res.say, res.cards);
+    speak(stripCodeForSpeech(res.say), {
+      pacing: res.pacing,
+      onstart: () => setState('speaking'),
+      onend: () => { if (state === 'speaking') setState('standby', 'All set. Here if you need me.'); },
+    });
+    if (!('speechSynthesis' in window) || MAX.LS.get('textOnly', false)) {
+      setState('standby', res.say);
+    }
+  }
+
+  function handleNotify(msg) {
+    toast(msg.label, msg.id ? [{ label: 'Snooze 10m', fn: () => MAX.post('/api/schedule/snooze', { id: msg.id, minutes: 10 }).then(() => toast('Snoozed 10 minutes.')) }] : null);
+    MAX.notify('Jarvis', msg.label);
+    if (msg.kind === 'alarm' || msg.kind === 'timer' || msg.kind === 'reminder') speak(msg.label, {});
+  }
+
+  /* ---------- need banner: surface WHY something isn't working ---------- */
+  const needBanner = document.getElementById('needBanner');
+  const needBannerText = document.getElementById('needBannerText');
+  let nbKey = '', nbDismissed = null;
+  const OFFLINE_COPY = "Hub offline — the server process isn't running (it stops when this workspace sleeps). Restart it: node hub/server.js — retrying in the background…";
+  function renderNeeds(kind, lines) {
+    nbKey = kind + '|' + lines.join('|');
+    if (nbKey === nbDismissed) { needBanner.hidden = true; return; }
+    needBanner.hidden = false;
+    needBanner.className = 'need-banner ' + kind;
+    needBannerText.textContent = lines[0] + (lines.length > 1 ? ` (+${lines.length - 1} more — Systems has the full list)` : '');
+  }
+  document.getElementById('needBannerX').onclick = () => { nbDismissed = nbKey; needBanner.hidden = true; };
+  async function refreshNeeds() {
+    try {
+      const S = await MAX.get('/api/status');
+      const needs = (S.needs || []).filter((n) => n.severity === 'blocked' || n.severity === 'warn');
+      if (needs.length) renderNeeds('warn', needs.map((n) => n.what + ' Fix: ' + n.fix));
+      else needBanner.hidden = true;
+    } catch { renderNeeds('off', [OFFLINE_COPY]); }
+  }
+  setInterval(refreshNeeds, 30000);
+
+  /* ---------- toasts ---------- */
+  let toastEl = null;
+  function toast(text, actions) {
+    if (toastEl) toastEl.remove();
+    toastEl = document.createElement('div');
+    toastEl.className = 'toast';
+    toastEl.setAttribute('role', 'alert');
+    const span = document.createElement('span'); span.textContent = text; toastEl.appendChild(span);
+    (actions || []).forEach((a) => {
+      const b = document.createElement('button'); b.className = 'btn'; b.textContent = a.label;
+      b.onclick = () => { a.fn(); }; toastEl.appendChild(b);
+    });
+    const close = document.createElement('button'); close.className = 'btn ghost'; close.textContent = '✕'; close.setAttribute('aria-label', 'Dismiss');
+    close.onclick = () => { toastEl.remove(); toastEl = null; };
+    toastEl.appendChild(close);
+    document.body.appendChild(toastEl);
+    setTimeout(() => { if (toastEl) { toastEl.remove(); toastEl = null; } }, 12000);
+  }
+
+  /* ---------- chat ---------- */
+  const chatPanel = document.getElementById('chatPanel');
+  const chatLog = document.getElementById('chatLog');
+  const chatForm = document.getElementById('chatForm');
+  const chatInput = document.getElementById('chatInput');
+  let lastUserText = '';
+
+  /* code blocks shouldn't be read aloud word-for-word */
+  function stripCodeForSpeech(text) {
+    return String(text || '')
+      .replace(/```[\s\S]*?```/g, ' — the code is on your screen — ')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  /* Icon-only copy buttons (lucide "copy" glyph → checkmark) */
+  function makeIcon(kind) {
+    const wrap = document.createElement('span');
+    wrap.innerHTML = kind === 'check'
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+    return wrap.firstChild;
+  }
+  function setCopyBtn(btn, kind) {
+    btn.replaceChildren(makeIcon(kind));
+    btn.classList.toggle('done', kind === 'check');
+  }
+
+  async function copyText(str, btn) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(str); ok = true; }
+    catch {
+      const ta = document.createElement('textarea');
+      ta.value = str; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch {}
+      ta.remove();
+    }
+    if (btn) {
+      setCopyBtn(btn, ok ? 'check' : 'clipboard');
+      setTimeout(() => setCopyBtn(btn, 'clipboard'), 1500);
+    }
+  }
+
+  function appendProse(container, str) {
+    const p = document.createElement('p');
+    String(str).split(/`([^`]+)`/g).forEach((part, i) => {
+      if (i % 2 === 1) {
+        const c = document.createElement('code');
+        c.className = 'inline'; c.textContent = part;
+        p.appendChild(c);
+      } else if (part) p.appendChild(document.createTextNode(part));
+    });
+    container.appendChild(p);
+  }
+
+  // === hl:start ===
+  /* zero-dependency syntax tinting: escape-then-tokenize, output is always safe HTML.
+     families: clike (c/cpp/ino), js/ts, python, shell, key-value (yaml/ini/toml), css, html, generic */
+  function highlightCode(code, lang) {
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const t = String(lang || '').toLowerCase();
+    if (t === 'html' || t === 'xml' || t === 'svg' || t === 'markup') {
+      return esc(code).replace(/&lt;!--[\s\S]*?--&gt;|"[^"\n]*"|'[^'\n]*'|&lt;\/?[a-zA-Z][\w:-]*|\/?&gt;/g, (m) =>
+        m.startsWith('&lt;!--') ? '<span class="tok-c">' + m + '</span>'
+          : (m[0] === '"' || m[0] === "'") ? '<span class="tok-s">' + m + '</span>'
+            : '<span class="tok-k">' + m + '</span>');
+    }
+    const C_KW = ('alignas alignof auto bool break case catch char char8_t char16_t char32_t class concept const ' +
+      'consteval constexpr constinit const_cast continue co_await co_return co_yield decltype default delete do double ' +
+      'dynamic_cast else enum explicit export extern false float for friend goto if inline int long mutable namespace ' +
+      'new noexcept nullptr operator private protected public register reinterpret_cast requires restrict return short ' +
+      'signed sizeof static static_assert static_cast struct switch template this thread_local throw true try typedef ' +
+      'typeid typename union unsigned using virtual void volatile wchar_t while').split(' ');
+    const JS_KW = ('async await break case catch class const continue debugger default delete do else export extends ' +
+      'finally for from function if import in instanceof let new of return static super switch this throw try typeof ' +
+      'undefined var void while with yield true false null get set').split(' ');
+    const PY_KW = ('and as assert async await break class continue def del elif else except finally for from global if ' +
+      'import in is lambda nonlocal not or pass print raise return try while with yield True False None self').split(' ');
+    const SH_KW = ('case do done elif else esac fi for function if in local return select then until while echo export ' +
+      'cd source readonly shift set').split(' ');
+    const TFN = 'true false null yes no on off'.split(' ');
+    const GEN_KW = ('const let var function return if elif else for while do switch case break continue class struct ' +
+      'enum new delete void int long float double char bool unsigned signed static public private import from def echo ' +
+      'try catch throw in of async await print true false null None True False undefined').split(' ');
+    const STR_STD = '"(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\'';
+    const FAMS = {
+      clike: { block: 1, sl: '//', preproc: 1, kw: C_KW, str: STR_STD },
+      js: { block: 1, sl: '//', kw: JS_KW, str: STR_STD + '|`[^`]*`' },
+      py: { sl: '#', deco: 1, kw: PY_KW, str: '"""[\\s\\S]*?"""|\'\'\'[\\s\\S]*?\'\'\'|' + STR_STD },
+      sh: { sl: '#', kw: SH_KW, str: STR_STD },
+      kv: { sl: '#', kw: TFN, str: STR_STD },
+      json: { kw: 'true false null'.split(' '), str: '"(?:[^"\\\\\\n]|\\\\.)*"' },
+      css: { block: 1, kw: ['!important'], str: STR_STD, css: 1 },
+      generic: { block: 1, sl: '//', kw: GEN_KW, str: STR_STD },
+    };
+    const ALIAS = {
+      c: 'clike', h: 'clike', cpp: 'clike', 'c++': 'clike', cc: 'clike', cxx: 'clike', hpp: 'clike', ino: 'clike', arduino: 'clike',
+      js: 'js', mjs: 'js', cjs: 'js', jsx: 'js', ts: 'js', tsx: 'js', javascript: 'js', typescript: 'js',
+      py: 'py', python: 'py', sh: 'sh', bash: 'sh', zsh: 'sh', shell: 'sh',
+      yaml: 'kv', yml: 'kv', ini: 'kv', toml: 'kv', cfg: 'kv', json: 'json', jsonc: 'js',
+      css: 'css', scss: 'css', less: 'css', java: 'clike', cs: 'clike', go: 'clike', rs: 'clike', rust: 'clike',
+    };
+    const fam = FAMS[ALIAS[t] || 'generic'];
+    const pats = [];
+    if (fam.block) pats.push(['c', '\\/\\*[\\s\\S]*?\\*\\/']);
+    if (fam.sl === '//') pats.push(['c', '\\/\\/[^\\n]*']);
+    if (fam.sl === '#') pats.push(['c', '#[^\\n]*']);
+    pats.push(['s', fam.str]);
+    if (fam.preproc) pats.push(['p', '^[ \\t]*#[^\\n]*']);
+    if (fam.deco) pats.push(['p', '@[\\w.]+']);
+    if (fam.css) pats.push(['p', '@[a-zA-Z-]+']);
+    if (fam.css) pats.push(['n', '#[0-9a-fA-F]{3,8}\\b']);
+    if (fam.kw && fam.kw.length) {
+      const kw = fam.kw.slice().sort((a, b) => b.length - a.length).join('|');
+      pats.push(['k', '\\b(?:' + kw + ')\\b']);
+    }
+    pats.push(['n', '\\b(?:0[xX][0-9a-fA-F]+|0[bB][01]+|\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)(?:[fFlLuU]{0,3})\\b']);
+    if (fam.css) pats.push(['n', '\\b\\d+(?:\\.\\d+)?(?:px|em|rem|vh|vw|vmin|vmax|%|s|ms|deg|fr|ch)\\b']);
+    pats.push(['f', '[A-Za-z_]\\w*(?=\\s*\\()']);
+    const re = new RegExp(pats.map((p) => '(' + p[1] + ')').join('|'), 'gm');
+    let out = '', last = 0, m;
+    const src = String(code);
+    while ((m = re.exec(src))) {
+      out += esc(src.slice(last, m.index));
+      for (let g = 1; g <= pats.length; g++) {
+        if (m[g] !== undefined) { out += '<span class="tok-' + pats[g - 1][0] + '">' + esc(m[0]) + '</span>'; break; }
+      }
+      last = re.lastIndex;
+    }
+    return out + esc(src.slice(last));
+  }
+  // === hl:end ===
+
+  function appendCode(container, lang, code) {
+    const wrap = document.createElement('div');
+    wrap.className = 'codeblock';
+    const bar = document.createElement('div');
+    bar.className = 'codebar';
+    const l = document.createElement('span');
+    l.className = 'lang';
+    l.textContent = lang || 'code';
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn'; btn.type = 'button';
+    btn.title = 'Copy code';
+    btn.setAttribute('aria-label', 'Copy code');
+    setCopyBtn(btn, 'clipboard');
+    btn.onclick = () => copyText(code, btn);
+    bar.append(l, btn);
+    const pre = document.createElement('pre');
+    const cd = document.createElement('code');
+    cd.className = 'language-' + (lang || 'text');
+    cd.innerHTML = highlightCode(code, lang);
+    pre.appendChild(cd);
+    wrap.append(bar, pre);
+    container.appendChild(wrap);
+  }
+
+  /* rich renderer: fenced blocks → code cards w/ language + copy; prose → paragraphs */
+  function renderRich(container, text) {
+    const re = /```([a-zA-Z0-9+#.-]*)\n?([\s\S]*?)```/g;
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      const prose = text.slice(last, m.index).trim();
+      if (prose) appendProse(container, prose);
+      appendCode(container, m[1], m[2].replace(/\n$/, ''));
+      last = re.lastIndex;
+    }
+    const tail = text.slice(last).trim();
+    if (tail || !last) appendProse(container, tail);
+  }
+
+  function addBubble(who, text, cards) {
+    const b = document.createElement('div');
+    b.className = 'bubble ' + (who === 'me' ? 'me' : 'max');
+    if (who === 'max') {
+      renderRich(b, String(text ?? ''));
+      const acts = document.createElement('div');
+      acts.className = 'bubble-actions';
+      const all = document.createElement('button');
+      all.className = 'mini-btn'; all.type = 'button';
+      setCopyBtn(all, 'clipboard');
+      all.title = 'Copy the whole reply';
+      all.setAttribute('aria-label', 'Copy the whole reply');
+      all.onclick = () => copyText(String(text ?? ''), all);
+      acts.appendChild(all);
+      b.appendChild(acts);
+    } else {
+      b.textContent = text;
+    }
+    (cards || []).forEach((c) => {
+      const cite = document.createElement('span');
+      cite.className = 'cite';
+      cite.textContent = c.title + (c.source ? ' · ' + c.source : '');
+      b.appendChild(cite);
+    });
+    chatLog.appendChild(b);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+  chatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const t = chatInput.value.trim(); if (!t) return;
+    chatInput.value = '';
+    addBubble('me', t);
+    lastUserText = t;
+    setState('thinking');
+    sendUtterance(t);
+  });
+
+  /* ---------- speech recognition (STT + wake word fallback) ---------- */
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null, wakeRec = null, wakeOn = false, listening = false;
+
+  /* Embedded previews (dashboard iframes) usually can't grant mic permission,
+     and Chrome won't even show the allow prompt there. Detect it and say so,
+     instead of a dead-looking mic button. */
+  function inIframe() { try { return window.self !== window.top; } catch { return true; } }
+  function micPolicyAllows() { // null = this browser can't tell us
+    const pp = document.permissionsPolicy || document.featurePolicy;
+    if (!pp || !pp.allowsFeature) return null;
+    try { return !!pp.allowsFeature('microphone'); } catch { return null; }
+  }
+  const EMBED_MIC_MSG = 'This embedded preview has no microphone permission — open Jarvis in its own browser tab (the ↗ icon on the preview bar, or copy this URL into a new tab), then tap again.';
+  function openFullTab() { try { window.open(location.href, '_blank', 'noopener'); } catch {} }
+  function flashMicProblem(hint) {
+    if (!hint) return;
+    if (hint === EMBED_MIC_MSG) toast(hint, [{ label: 'Open full tab ↗', fn: openFullTab }]);
+    else flashError(hint);
+  }
+
+  function micWhyNot() {
+    if (!window.isSecureContext) return 'Mic needs a secure page — on this machine open http://localhost:8080 (Chrome blocks mics on http:// network addresses);';
+    if (!SR) return 'Speech recognition only exists in Chrome/Edge (and it talks to Google servers) — you can type instead;';
+    if (inIframe() && micPolicyAllows() === false) return EMBED_MIC_MSG;
+    return '';
+  }
+  function micErrorHint(err) {
+    switch (err) {
+      case 'not-allowed':
+      case 'service-not-allowed':
+        if (inIframe()) return EMBED_MIC_MSG; // iframes often can't even show the allow prompt
+        return 'Mic blocked — click the tune/lock icon left of the address bar → allow Microphone → reload.';
+      case 'audio-capture': return 'No microphone found — check your input device and that no other app is holding it.';
+      case 'network': return 'Chrome\'s speech service is unreachable (it uses Google servers) — check your internet, or type instead.';
+      case 'no-speech': return '';
+      case 'aborted': return '';
+      default: return 'Mic hiccup: ' + err;
+    }
+  }
+
+  function startListening() {
+    const why = micWhyNot();
+    if (why) { flashMicProblem(why); chatPanel.classList.add('open'); return; }
+    if (listening) return;
+    stopSpeaking();
+    // a running wake-word recognizer holds the mic — park it; it resumes on end
+    if (wakeRec) { try { wakeRec.stop(); } catch {} wakeRec = null; }
+    rec = new SR();
+    rec.lang = MAX.LS.get('lang', 'en-US');
+    rec.interimResults = true;
+    rec.continuous = false;
+    listening = true;
+    micChip.classList.add('on');
+    setState('listening');
+    transcriptLine.textContent = '';
+    let finalText = '';
+    let heardSomething = false;
+    let hearWatchdog = null;
+    const endUi = () => {
+      listening = false;
+      micChip.classList.remove('on');
+      if (hearWatchdog) { clearTimeout(hearWatchdog); hearWatchdog = null; }
+    };
+    rec.onresult = (e) => {
+      heardSomething = true;
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+        else interim += e.results[i][0].transcript;
+      }
+      transcriptLine.textContent = (finalText + interim).trim();
+    };
+    rec.onerror = (e) => {
+      // Chrome does NOT guarantee onend after onerror — without this cleanup
+      // the ring stays stuck in "listening" forever after any STT failure.
+      endUi();
+      if (state === 'listening') setState('standby');
+      flashMicProblem(micErrorHint(e.error));
+      if (wakeOn && !wakeRec) setWake(true);
+    };
+    rec.onend = () => {
+      endUi();
+      const t = (finalText || transcriptLine.textContent).trim();
+      transcriptLine.textContent = '';
+      if (t) { lastUserText = t; addBubble('me', t); setState('thinking'); sendUtterance(t); }
+      else if (state === 'listening') setState('standby');
+      if (wakeOn && !wakeRec) setWake(true);
+    };
+    // dead speech service / silent input device: Chrome can sit in "listening"
+    // with zero events forever — bail out with an actionable hint instead.
+    hearWatchdog = setTimeout(() => {
+      if (!listening || heardSomething) return;
+      try { rec.abort(); } catch {}
+      endUi();
+      if (state === 'listening') setState('standby');
+      chatPanel.classList.add('open');
+      toast('I couldn’t hear anything — check the mic isn’t muted and the right input device is selected (click the tune/lock icon by the address bar → Microphone), or type below instead.');
+    }, 12000);
+    try { rec.start(); }
+    catch {
+      endUi();
+      setState('standby');
+      toast('The mic refused to start — close other tabs or apps holding the microphone, then try again.');
+      if (wakeOn && !wakeRec) setWake(true);
+    }
+  }
+  function stopListening() { if (rec && listening) { try { rec.stop(); } catch {} } }
+
+  /* Wake word fallback: continuous recognition watching for "jarvis"/"hey jarvis" */
+  function setWake(on) {
+    wakeOn = on;
+    document.getElementById('wakeBtn').innerHTML = on ? 'Hey&nbsp;Jarvis&nbsp;●' : 'Hey&nbsp;Jarvis&nbsp;○';
+    document.getElementById('wakeBtn').setAttribute('aria-pressed', on);
+    if (!on) { if (wakeRec) { try { wakeRec.stop(); } catch {} wakeRec = null; } micChip.classList.remove('on'); return; }
+    const wakeWhy = micWhyNot();
+    if (wakeWhy) { toast(wakeWhy, wakeWhy === EMBED_MIC_MSG ? [{ label: 'Open full tab ↗', fn: openFullTab }] : null); return; }
+    const loop = () => {
+      if (!wakeOn) return;
+      wakeRec = new SR();
+      wakeRec.continuous = true; wakeRec.interimResults = true;
+      wakeRec.lang = MAX.LS.get('lang', 'en-US');
+      wakeRec.onresult = (e) => {
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const said = e.results[i][0].transcript.toLowerCase();
+          if (WakeWord.match(said).wake && state === 'standby') {
+            MAX.notify('Jarvis', 'Wake word heard');
+            transcriptLine.textContent = '';
+            try { wakeRec.stop(); } catch {}
+            startListening();
+            return;
+          }
+        }
+      };
+      wakeRec.onend = () => { micChip.classList.toggle('on', wakeOn); if (wakeOn && !listening) setTimeout(loop, 600); };
+      wakeRec.onerror = () => {};
+      try { wakeRec.start(); micChip.classList.add('on'); } catch {}
+    };
+    loop();
+  }
+
+  /* ---------- ring activation ---------- */
+  ringWrap.addEventListener('click', () => {
+    spawnRipple();
+    if (state === 'listening') stopListening();
+    else if (state === 'speaking') { MAX.stopSpeaking(); setState('standby'); }
+    else if (state === 'alert') cancelSOS();
+    else startListening();
+  });
+
+  /* ---------- voice verification (experimental, best-effort) ---------- */
+  const verifyDrawer = document.getElementById('verifyDrawer');
+  let mediaStream = null;
+
+  async function captureVoiceFeatures(seconds = 2.2) {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micChip.classList.add('on');
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const src = ac.createMediaStreamSource(mediaStream);
+    const an = ac.createAnalyser(); an.fftSize = 2048;
+    src.connect(an);
+    const time = new Uint8Array(an.fftSize);
+    const freq = new Uint8Array(an.frequencyBinCount);
+    const samples = [];
+    const t0 = performance.now();
+    while (performance.now() - t0 < seconds * 1000) {
+      await new Promise((r) => setTimeout(r, 90));
+      an.getByteTimeDomainData(time);
+      an.getByteFrequencyData(freq);
+      let rms = 0, crossings = 0;
+      for (let i = 0; i < time.length; i++) {
+        const v = (time[i] - 128) / 128; rms += v * v;
+        if (i && ((time[i - 1] < 128) !== (time[i] < 128))) crossings++;
+      }
+      rms = Math.sqrt(rms / time.length);
+      const zcr = crossings / time.length;
+      let num = 0, den = 0, low = 0, high = 0;
+      for (let i = 0; i < freq.length; i++) {
+        num += i * freq[i]; den += freq[i];
+        if (i < freq.length * 0.125) low += freq[i]; else if (i > freq.length * 0.5) high += freq[i];
+      }
+      samples.push([rms, zcr * 10, den ? num / den / freq.length : 0, den ? low / den : 0, den ? high / den : 0]);
+    }
+    ac.close(); mediaStream.getTracks().forEach((t) => t.stop()); micChip.classList.remove('on');
+    const avg = [0, 0, 0, 0, 0].map((_, i) => samples.reduce((s, x) => s + x[i], 0) / Math.max(1, samples.length));
+    return avg.map((v) => Math.round(v * 1000) / 1000);
+  }
+
+  async function openVerify(line) {
+    verifyDrawer.classList.add('open');
+    speak(line || 'Please verify.', {});
+    try {
+      // liveness: fetch a fresh phrase the user must actually say out loud
+      let ch = null;
+      try { ch = await MAX.get('/api/voiceprint/challenge?user=' + encodeURIComponent(MAX.user())); } catch (e) {
+        verifyDrawer.classList.remove('open');
+        const msg = (e && e.message) || '';
+        if (/locked/i.test(msg)) flashError('Voice verification is locked for a few minutes after repeated failures.');
+        else if (/no voiceprint/i.test(msg)) flashError('No voiceprint enrolled — see Settings to enroll your voice first.');
+        else flashError('Verification unavailable: ' + msg);
+        pendingVerifyUtterance = null;
+        return;
+      }
+      verifyText.innerHTML = 'To prove it’s really you, say: <b>' + ch.phrase.replace(/</g, '&lt;') + '</b>';
+      speak('Please say: ' + ch.phrase, {});
+      await new Promise((r) => setTimeout(r, 1300));
+
+      // listen (for the spoken phrase) while sampling the voiceprint in parallel
+      const SRv = window.SpeechRecognition || window.webkitSpeechRecognition;
+      let spoken = '';
+      let recog = null;
+      if (SRv) {
+        try {
+          recog = new SRv();
+          recog.lang = 'en-US'; recog.interimResults = true; recog.continuous = true;
+          recog.onresult = (ev) => { for (let i = ev.resultIndex; i < ev.results.length; i++) spoken += ' ' + ev.results[i][0].transcript; };
+          recog.start();
+        } catch { recog = null; }
+      }
+      const features = await captureVoiceFeatures();
+      if (recog) { try { recog.stop(); } catch {} }
+      const res = await MAX.post('/api/voiceprint/verify', { user: MAX.user(), features, challengeId: ch.id, spoken: spoken.trim() });
+      verifyText.textContent = 'This action is sensitive. Say your passphrase after the tone…';
+      verifyDrawer.classList.remove('open');
+      if (res.ok && res.token) {
+        toast('Voice verified.');
+        if (pendingVerifyUtterance) { sendUtterance(pendingVerifyUtterance, { verifyToken: res.token }); pendingVerifyUtterance = null; }
+      } else if (res.locked) {
+        flashError('Verification is locked for ~' + Math.ceil((res.retryAfterSec || 900) / 60) + ' min.');
+        pendingVerifyUtterance = null;
+      } else if (res.spoken === false) {
+        flashError('The phrase didn’t match — press the action again and say the exact words shown.');
+        pendingVerifyUtterance = null;
+      } else {
+        flashError(res.error || 'Voice did not match closely enough.');
+        pendingVerifyUtterance = null;
+      }
+    } catch (e) {
+      verifyText.textContent = 'This action is sensitive. Say your passphrase after the tone…';
+      verifyDrawer.classList.remove('open');
+      flashMicProblem(inIframe() ? EMBED_MIC_MSG : 'Could not access the mic for verification.');
+    }
+  }
+  document.getElementById('verifyCancel').onclick = () => { verifyDrawer.classList.remove('open'); pendingVerifyUtterance = null; setState('standby'); };
+
+  /* ---------- vision: dedicated page ---------- */
+  document.getElementById('visionBtn').onclick = () => { location.href = 'vision.html'; };
+
+  /* ---------- SOS ---------- */
+  async function triggerSOS() {
+    setState('alert', 'Sending SOS…');
+    alertActive = true;
+    try {
+      const res = await MAX.post('/api/sos', { user: MAX.user() });
+      setState('alert', res.message);
+      speak(res.message + ' Tap the ring to stand down.', {});
+    } catch { flashError('SOS could not reach the hub.'); }
+  }
+  async function cancelSOS() { alertActive = false; try { await MAX.post('/api/utterance', { text: 'cancel the sos', user: MAX.user() }); } catch {} setState('standby', 'Standing down. Glad you’re safe.'); }
+  document.getElementById('sosBtn').onclick = triggerSOS;
+
+  /* ---------- dock ---------- */
+  document.getElementById('wakeBtn').onclick = () => setWake(!wakeOn);
+  /* HUD widget layer: easy to hide (persisted); the ring stays the focus. */
+  const hudBtn = document.getElementById('hudBtn');
+  function setHud(on) {
+    document.body.classList.toggle('widgets-hidden', !on);
+    MAX.LS.set('hud', on);
+    hudBtn.innerHTML = on ? 'HUD&nbsp;●' : 'HUD&nbsp;○';
+    hudBtn.setAttribute('aria-pressed', on);
+  }
+  hudBtn.onclick = () => setHud(document.body.classList.contains('widgets-hidden'));
+  setHud(MAX.LS.get('hud', true));
+  /* the widget layer is decorative — the page must NEVER depend on it. If
+     js/widgets.js failed to load (e.g. hub offline + not yet SW-cached), an
+     unguarded mountAll() would kill this whole script. */
+  if (window.MAX && MAX.widgets && MAX.widgets.mountAll) {
+    try { MAX.widgets.mountAll(); } catch { /* widgets optional — page continues */ }
+  } else {
+    const l = document.getElementById('hudLayer');
+    if (l) l.style.display = 'none';
+    hudBtn.style.display = 'none';
+  }
+  document.getElementById('typeBtn').onclick = () => {
+    const open = chatPanel.classList.toggle('open');
+    document.getElementById('typeBtn').setAttribute('aria-pressed', open);
+    if (open) chatInput.focus();
+  };
+  if (MAX.LS.get('textOnly', false)) chatPanel.classList.add('open');
+
+  /* proactive nudge on load (quiet, once) */
+  MAX.get('/api/proactive').then((items) => {
+    if (items && items.length && !sessionStorage.getItem('max.proactive')) {
+      sessionStorage.setItem('max.proactive', '1');
+      setTimeout(() => toast(items[0].text), 4000);
+    }
+  }).catch(() => {});
+
+  connect();
+  refreshNeeds();
+  /* periodic health recovery if WS is flaky */
+  setInterval(() => { if (!wsOpen) MAX.get('/api/health').then(() => hubOnline(true)).catch(() => hubOnline(false)); }, 15000);
+
+  /* PWA shortcut: index.html?sos=1 */
+  if (new URLSearchParams(location.search).get('sos') === '1') setTimeout(triggerSOS, 800);
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meeting Notes · Jarvis</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/theme.css">
+<style>
+  .turn { padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 13px; font-weight: 600; }
+  .turn .t { color: var(--ink-dim); font-size: 11px; margin-right: 8px; }
+  .live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--cyan); display: inline-block; margin-right: 6px; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .summary-box { white-space: pre-wrap; font-size: 13px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="glow-field" aria-hidden="true"></div>
+<header class="topbar">
+  <a class="wordmark" href="index.html">JARVIS</a>
+  <span class="chip" id="micChip"><span class="semi-dot"></span>mic</span>
+  <span class="spacer"></span>
+  <a class="navlink" href="vision.html">Vision</a>
+  <a class="navlink" href="logs.html">Logs</a>
+  <a class="navlink" href="systems.html">Systems</a>
+  <a class="navlink" href="settings.html">Settings</a>
+</header>
+
+<main class="panel grid">
+  <section class="card" style="grid-column:1/-1" aria-labelledby="m-rec">
+    <h3 id="m-rec">Meeting assistant</h3>
+    <p class="muted">Point the mic at the meeting. Lines are transcribed <b>in this browser</b> and only sent to the hub when you press “Save notes”. Summaries use the existing brain (cloud or local) — no new provider.</p>
+    <div class="toolbar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn primary" id="b-start" type="button">Start listening</button>
+      <button class="btn" id="b-stop" type="button" disabled>Stop</button>
+      <input id="f-title" placeholder="meeting title" style="font:inherit;padding:8px;border:1px solid var(--line);border-radius:10px" value="">
+      <button class="btn" id="b-save" type="button" disabled>Save notes</button>
+      <button class="btn ghost" id="b-sum" type="button" disabled>Notes + action items</button>
+    </div>
+    <p class="muted" id="m-status">Idle.</p>
+  </section>
+
+  <section class="card" style="grid-column:1/-1" aria-labelledby="m-live">
+    <h3 id="m-live"><span class="live-dot" id="liveDot" style="visibility:hidden"></span>Transcript (<span id="cnt">0</span> lines)</h3>
+    <div id="turns"><p class="muted">Nothing captured yet.</p></div>
+  </section>
+
+  <section class="card" style="grid-column:1/-1" aria-labelledby="m-sum">
+    <h3 id="m-sum">Notes &amp; action items</h3>
+    <div class="summary-box" id="summary"><span class="muted">Save first, then press “Notes + action items”.</span></div>
+  </section>
+
+  <section class="card" style="grid-column:1/-1" aria-labelledby="m-past">
+    <h3 id="m-past">Recent meetings</h3>
+    <ul id="pastList"><li class="muted">Loading…</li></ul>
+  </section>
+</main>
+
+<script src="js/common.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null, capturing = false, lines = [], meetingId = null;
+
+  function inIframe() { try { return window.self !== window.top; } catch { return true; } }
+  function status(t) { $('m-status').textContent = t; }
+  function addLine(text, who) {
+    lines.push({ ts: Date.now(), who: who || '', text });
+    const d = document.createElement('div'); d.className = 'turn';
+    d.innerHTML = '<span class="t">' + new Date().toLocaleTimeString() + '</span>';
+    d.append(document.createTextNode((who ? who + ': ' : '') + text));
+    if (lines.length === 1) $('turns').innerHTML = '';
+    $('turns').appendChild(d);
+    $('cnt').textContent = lines.length;
+    $('b-save').disabled = false;
+  }
+
+  $('b-start').onclick = () => {
+    if (!SR) { status('This browser has no SpeechRecognition — use Chrome/Edge.'); return; }
+    if (!window.isSecureContext) { status('Needs a secure page (localhost or https).'); return; }
+    if (inIframe()) { status('Embedded previews can’t use the mic — open this page in its own tab.'); return; }
+    rec = new SR();
+    rec.lang = MAX.LS.get('lang', 'en-US');
+    rec.interimResults = true; rec.continuous = true;
+    rec.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++)
+        if (e.results[i].isFinal && e.results[i][0].transcript.trim()) addLine(e.results[i][0].transcript.trim());
+    };
+    rec.onerror = (e) => { if (e.error === 'not-allowed') { stop(); status('Mic blocked — allow it via the lock/tune icon by the address bar, then retry.'); } };
+    rec.onend = () => { if (capturing) { try { rec.start(); } catch {} } }; // browser auto-stops on pauses; keep capturing
+    try { rec.start(); } catch { status('Mic refused to start — close other tabs holding it.'); return; }
+    capturing = true;
+    $('liveDot').style.visibility = 'visible';
+    $('micChip').classList.add('on');
+    $('b-start').disabled = true; $('b-stop').disabled = false;
+    status('Listening… speak away.');
+  };
+  function stop() {
+    capturing = false;
+    if (rec) { try { rec.stop(); } catch {} }
+    $('liveDot').style.visibility = 'hidden';
+    $('micChip').classList.remove('on');
+    $('b-start').disabled = false; $('b-stop').disabled = true;
+    status(lines.length ? 'Stopped. Save when ready.' : 'Idle.');
+  }
+  $('b-stop').onclick = stop;
+
+  $('b-save').onclick = async () => {
+    if (!lines.length) return;
+    try {
+      const r = await MAX.post('/api/meetings', { title: $('f-title').value || 'Meeting ' + new Date().toLocaleString(), turns: lines });
+      meetingId = r.id;
+      $('b-sum').disabled = false;
+      status('Saved (' + lines.length + ' lines). Press “Notes + action items” for the AI summary.');
+      loadPast();
+    } catch (e) { status('Could not save: ' + e.message); }
+  };
+  $('b-sum').onclick = async () => {
+    if (!meetingId) return;
+    $('summary').textContent = 'Thinking…';
+    try {
+      const r = await MAX.post('/api/meetings/summarize', { id: meetingId, user: MAX.LS.get('user', 'default') });
+      $('summary').textContent = r.summary;
+    } catch (e) { $('summary').textContent = 'Summary failed: ' + e.message; }
+  };
+  async function loadPast() {
+    try {
+      const list = await MAX.get('/api/meetings');
+      $('pastList').innerHTML = list.length ? list.map((m) =>
+        `<li><b>${String(m.title).replace(/[<>&]/g, '')}</b> — ${new Date(m.at).toLocaleString()} · ${m.turns} lines${m.hasSummary ? ' · summarized' : ''}</li>`).join('')
+        : '<li class="muted">No meetings saved yet.</li>';
+    } catch { $('pastList').innerHTML = '<li class="muted">Hub unreachable.</li>'; }
+  }
+  loadPast();
+})();
+</script>
+</body>
+</html>
