@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jarvis — Vision</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/theme.css">
+<style>
+  .vis-grid { display: grid; gap: 16px; grid-template-columns: minmax(300px, 1.3fr) minmax(260px, 1fr); align-items: start; }
+  @media (max-width: 820px) { .vis-grid { grid-template-columns: 1fr; } }
+  .cam-card { position: relative; overflow: hidden; }
+  .cam-stage { position: relative; border-radius: 18px; overflow: hidden; background: #2b241d; aspect-ratio: 4/3; }
+  .cam-stage video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cam-stage .off-msg {
+    position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px;
+    align-items: center; justify-content: center; color: var(--line);
+    font-weight: 700; letter-spacing: 2px; font-size: 12px; text-transform: uppercase;
+  }
+  .live-chip {
+    position: absolute; top: 12px; left: 12px; z-index: 3;
+    display: none; align-items: center; gap: 7px;
+    background: rgba(3, 10, 19, 0.86); color: var(--ink);
+    padding: 6px 12px; border-radius: 999px;
+    font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  }
+  .live-chip .rec { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 8px var(--teal); animation: blink 1.6s infinite; }
+  .cam-live .live-chip { display: inline-flex; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; align-items: center; }
+  .controls input[type=text] {
+    flex: 1; min-width: 180px; font: inherit; font-size: 14px; font-weight: 600; color: var(--ink);
+    background: rgba(4, 16, 31, 0.85); border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; outline: none;
+  }
+  .controls input[type=text]:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(56, 230, 192, 0.18); }
+  .controls select {
+    font: inherit; font-weight: 700; font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--ink); background: rgba(4, 16, 31, 0.85); border: 1px solid var(--line); border-radius: 999px; padding: 9px 12px;
+  }
+  .result {
+    display: flex; gap: 12px; padding: 12px; border: 1px solid var(--line);
+    border-radius: 16px; background: rgba(4, 16, 31, 0.85); margin-bottom: 10px; animation: rise 0.25s ease both;
+  }
+  .result img { width: 86px; height: 64px; object-fit: cover; border-radius: 10px; flex: none; background: #2b241d; }
+  .result .r-text { font-size: 13px; font-weight: 600; line-height: 1.5; white-space: pre-wrap; }
+  .result .r-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .result time { font-size: 10px; letter-spacing: 1px; color: var(--ink-dim); text-transform: uppercase; font-weight: 700; }
+  .ring-corner { position: absolute; right: -18px; top: -30px; width: 110px; height: 128px; opacity: 0.9; pointer-events: none; z-index: 2; }
+</style>
+</head>
+<body>
+<div class="glow-field" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="wordmark" href="index.html">JARVIS</a>
+  <span class="chip cam" id="camChip" aria-label="camera status"><span class="semi-dot"></span>cam</span>
+  <span class="spacer"></span>
+  <a class="navlink" href="index.html">Talk</a>
+  <a class="navlink active" href="vision.html">Vision</a>
+  <a class="navlink" href="systems.html">Systems</a>
+  <a class="navlink" href="settings.html">Settings</a>
+</header>
+
+<main class="panel">
+  <h1 style="font-size:22px;letter-spacing:3px;margin-bottom:4px">Vision</h1>
+  <p class="hint" style="margin-bottom:16px">Jarvis sees through your camera only while it's on. Frames are analyzed in memory and discarded — nothing is saved.</p>
+
+  <div class="vis-grid">
+    <section class="card cam-card" id="camCard" aria-labelledby="v-live">
+      <div class="ring-corner ring-wrap standby" id="miniRing" aria-hidden="true">
+        <svg viewBox="0 0 260 300"><ellipse class="ring-outline" cx="130" cy="150" rx="100" ry="120"/><ellipse class="core-fill" cx="130" cy="150" rx="100" ry="120"/><ellipse class="ring-glow" cx="130" cy="150" rx="100" ry="120"/></svg>
+      </div>
+      <h3 id="v-live">Live</h3>
+      <div class="cam-stage" id="camStage">
+        <span class="live-chip"><span class="rec"></span>Camera live</span>
+        <video id="cam" autoplay muted playsinline></video>
+        <div class="off-msg" id="offMsg"><span>Camera off</span><span style="opacity:.6;font-size:10px">starts only when you press Start</span></div>
+      </div>
+
+      <div class="status-line" id="visStatus" role="status" aria-live="polite" style="text-align:left;padding:10px 2px 0">Idle.</div>
+
+      <div class="controls">
+        <button class="btn primary" id="b-start">Start camera</button>
+        <button class="btn" id="b-look" disabled>Look</button>
+        <button class="btn" id="b-screen" style="display:none" title="One frame of your screen, once — enable in Settings first">Share screen once</button>
+      </div>
+      <div class="controls">
+        <input type="text" id="q" placeholder="Ask about what Jarvis sees… (e.g. what's on my desk?)" aria-label="Ask about what Jarvis sees">
+        <button class="btn" id="b-ask" disabled>Ask</button>
+      </div>
+      <div class="controls">
+        <select id="watch" aria-label="Watch mode interval">
+          <option value="0">Watch: off</option>
+          <option value="5">Watch: every 5s</option>
+          <option value="15">Watch: every 15s</option>
+          <option value="30">Watch: every 30s</option>
+        </select>
+        <span class="switch" title="Gesture shortcuts"><input type="checkbox" id="t-gestures" checked><span class="track"></span></span>
+        <span class="desc">Gestures</span>
+        <span class="switch" title="Speak results aloud"><input type="checkbox" id="t-speak" checked><span class="track"></span></span>
+        <span class="desc">Speak</span>
+      </div>
+      <p class="desc" style="margin-top:10px">Watch mode only analyzes when the scene <b>changes</b> (saves tokens). Gestures: → volume up · ← volume down · ↑ look once · ↓ stop.</p>
+    </section>
+
+    <section class="card" aria-labelledby="v-results">
+      <h3 id="v-results">What Jarvis saw</h3>
+      <div id="results"><p class="muted">Nothing yet — start the camera and press Look.</p></div>
+    </section>
+  </div>
+</main>
+
+<canvas id="probe" width="96" height="72" hidden></canvas>
+<canvas id="shot" hidden></canvas>
+
+<script src="js/common.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const cam = $('cam'), camCard = $('camCard'), camChip = $('camChip'), miniRing = $('miniRing');
+  const visStatus = $('visStatus'), results = $('results'), offMsg = $('offMsg');
+
+  let stream = null, analyzing = false, watchTimer = null, prevGrid = null;
+  let lastGestureAt = 0, gestureBuf = [], gestureTimer = null;
+  let mode = 'off', cloudReady = false;
+
+  const STATES = { idle: 'Idle.', live: 'Camera live.', watching: 'Watching — scene still.', changed: 'Scene changed — analyzing…', thinking: 'Looking…' };
+  function status(t) { visStatus.textContent = t; }
+  function ring(cls) { miniRing.classList.remove('standby', 'vision', 'thinking'); miniRing.classList.add(cls); }
+
+  /* ---------- privacy gate ---------- */
+  const OFF_HTML = offMsg.innerHTML; // "Camera off / starts only when you press Start"
+  function offDefault() {
+    offMsg.innerHTML = OFF_HTML;
+    offMsg.onclick = null; offMsg.style.cursor = 'default';
+  }
+  async function enableVision() {
+    try {
+      await MAX.post('/api/settings', { privacy: { vision: 'cloud' } });
+      mode = 'cloud'; cloudReady = true;
+      offDefault();
+      status('Vision enabled (cloud) — press Start camera.');
+    } catch (e) { status('Could not enable vision: ' + e.message); }
+  }
+  async function loadMode() {
+    try {
+      const c = await MAX.get('/api/vision/config');
+      mode = c.mode; cloudReady = c.cloudReady;
+    } catch { mode = 'off'; }
+    if (mode === 'off') {
+      status('Vision is off by default (privacy). Tap Enable — it stays on this machine.');
+      offMsg.innerHTML = '<button class="btn primary" type="button">Enable vision</button>';
+      offMsg.querySelector('button').onclick = enableVision;
+    }
+    else if (mode === 'local') status('Local-only mode: motion/brightness sensing works; scene descriptions need cloud vision or a local model.');
+    else if (!cloudReady) status('Cloud vision needs an OpenRouter key (Settings → OpenRouter Keys).');
+  }
+
+  /* ---------- camera ---------- */
+  function inIframe() { try { return window.self !== window.top; } catch { return true; } }
+  function camPolicyAllows() { // null = this browser can't tell us
+    const pp = document.permissionsPolicy || document.featurePolicy;
+    if (!pp || !pp.allowsFeature) return null;
+    try { return !!pp.allowsFeature('camera'); } catch { return null; }
+  }
+  const EMBED_CAM_MSG = 'This embedded preview has no camera permission — open Jarvis in its own browser tab (the ↗ icon on the preview bar, or copy this URL into a new tab), then press Start camera.';
+  function camWhyNot() {
+    if (!window.isSecureContext) return 'Camera needs a secure page — on this machine open http://localhost:8080 (Chrome blocks cameras on http:// network addresses).';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return 'This browser has no camera API — use Chrome.';
+    if (inIframe() && camPolicyAllows() === false) return EMBED_CAM_MSG;
+    return '';
+  }
+  function camErrorHint(err) {
+    switch (err && err.name) {
+      case 'NotAllowedError':
+        if (inIframe()) return EMBED_CAM_MSG; // iframes often can't even show the allow prompt
+        return 'Camera blocked — click the tune/lock icon left of the address bar → allow Camera → press Start camera again.';
+      case 'NotFoundError':
+      case 'OverconstrainedError': return 'No camera found on this device.';
+      case 'NotReadableError': return 'Camera is busy — close the other app using it (Zoom/Meet/Teams) and retry.';
+      case 'SecurityError': return 'Camera blocked by browser security — use localhost or https.';
+      default: return 'Camera unavailable: ' + ((err && err.name) || 'unknown') + ' — check browser permissions.';
+    }
+  }
+  async function startCam() {
+    const why = camWhyNot();
+    if (why) { status(why); return; }
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 960 } } }); }
+    catch (err) { status(camErrorHint(err)); return; }
+    cam.srcObject = stream;
+    camCard.classList.add('cam-live');
+    camChip.classList.add('on');
+    offMsg.style.display = 'none';
+    ring('vision');
+    status(STATES.live);
+    $('b-start').textContent = 'Stop camera';
+    $('b-look').disabled = $('b-ask').disabled = false;
+    if (!gestureTimer) gestureTimer = setInterval(gestureProbe, 160);
+  }
+  function stopCam() {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+    stopWatch();
+    if (gestureTimer) { clearInterval(gestureTimer); gestureTimer = null; }
+    camCard.classList.remove('cam-live');
+    camChip.classList.remove('on');
+    offMsg.style.display = 'flex';
+    ring('standby');
+    status(STATES.idle);
+    $('b-start').textContent = 'Start camera';
+    $('b-look').disabled = $('b-ask').disabled = true;
+  }
+  $('b-start').onclick = () => (stream ? stopCam() : startCam());
+
+  /* ---------- frame capture + change probe ---------- */
+  function gridNow() {
+    const p = $('probe').getContext('2d', { willReadFrequently: true });
+    try { p.drawImage(cam, 0, 0, 96, 72); } catch { return null; }
+    const d = p.getImageData(0, 0, 96, 72).data;
+    const g = [];
+    for (let gy = 0; gy < 3; gy++) for (let gx = 0; gx < 3; gx++) {
+      let s = 0, n = 0;
+      for (let y = gy * 24; y < gy * 24 + 24; y += 4) for (let x = gx * 32; x < gx * 32 + 32; x += 4) { s += d[(y * 96 + x) * 4]; n++; }
+      g.push(s / n);
+    }
+    return g;
+  }
+  function sceneEnergy() {
+    const g = gridNow();
+    if (!g) return 0;
+    if (!prevGrid) { prevGrid = g; return 1e9; }
+    let e = 0, wx = 0, wy = 0;
+    for (let i = 0; i < 9; i++) { const d = Math.abs(g[i] - prevGrid[i]); e += d; wx += d * (i % 3); wy += d * Math.floor(i / 3); }
+    prevGrid = g;
+    return e === 0 ? 0 : e, { e, cx: wx / (e || 1), cy: wy / (e || 1) };
+  }
+  function captureDataUrl() {
+    const vw = cam.videoWidth || 640, vh = cam.videoHeight || 480;
+    const scale = Math.min(1, 720 / vw);
+    const c = $('shot');
+    c.width = Math.round(vw * scale); c.height = Math.round(vh * scale);
+    c.getContext('2d').drawImage(cam, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.72);
+  }
+
+  /* ---------- describe ---------- */
+  async function look(question) {
+    if (!stream || analyzing) return;
+    if (mode === 'off') { status('Vision is off in Settings.'); return; }
+    analyzing = true;
+    ring('thinking');
+    status(STATES.thinking);
+    const frame = captureDataUrl();
+    try {
+      if (mode === 'local') {
+        const bright = Math.round(prevGrid ? prevGrid.reduce((a, b) => a + b, 0) / 9 : 0);
+        addResult(frame, `Local sense only: scene brightness ${bright}/255. Scene descriptions need cloud vision (Settings → Privacy) or a local vision model.`);
+      } else {
+        const res = await MAX.post('/api/vision/describe', { image: frame, question: question || '', user: MAX.user() });
+        addResult(frame, res.say, question);
+        if ($('t-speak').checked) MAX.speak(res.say, {});
+      }
+      status(STATES.live);
+    } catch (e) {
+      status('Vision hiccup: ' + e.message);
+    } finally {
+      analyzing = false;
+      ring(stream ? 'vision' : 'standby');
+    }
+  }
+  $('b-look').onclick = () => look($('q').value);
+
+  /* one-shot screen reading — OFF by default (Settings → Screen-reading), always
+     releases the display capture immediately after the single frame. The ring's
+     vision state marks it while active. */
+  async function screenOnce() {
+    if (!MAX.LS.get('screenShare', false)) { status('Screen reading is off — enable it in Settings → Appearance & Access.'); return; }
+    if (analyzing) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { status("This browser can't share a screen — use Chrome/Edge."); return; }
+    analyzing = true;
+    ring('vision'); status('Sharing one screen frame…');
+    let ds = null;
+    try {
+      ds = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const v = document.createElement('video');
+      v.srcObject = ds; await v.play();
+      await new Promise((r) => setTimeout(r, 300));
+      const c = $('shot'); c.width = v.videoWidth; c.height = v.videoHeight;
+      c.getContext('2d').drawImage(v, 0, 0);
+      const frame = c.toDataURL('image/jpeg', 0.7);
+      const res = await MAX.post('/api/vision/describe', { image: frame, question: $('q').value || 'Describe what is on this screen.', user: MAX.user() });
+      addResult(frame, res.say, $('q').value);
+      if ($('t-speak').checked) MAX.speak(res.say, {});
+      status(STATES.live);
+    } catch (e) { status('Screen share ended without a frame (' + ((e && e.message) || 'permission denied') + ').'); }
+    finally {
+      if (ds) ds.getTracks().forEach((t) => t.stop());
+      analyzing = false;
+      ring(stream ? 'vision' : 'standby');
+    }
+  }
+  $('b-screen').onclick = screenOnce;
+  if (MAX.LS.get('screenShare', false)) $('b-screen').style.display = '';
+  $('b-ask').onclick = () => look($('q').value || 'What do you see?');
+  $('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') look($('q').value || 'What do you see?'); });
+
+  /* ---------- watch mode (scene-change gated) ---------- */
+  $('watch').onchange = () => {
+    stopWatch();
+    const sec = parseInt($('watch').value, 10);
+    if (!sec || !stream) return;
+    watchTimer = setInterval(() => {
+      const probe = sceneEnergy();
+      const e = probe.e !== undefined ? probe.e : probe;
+      if (e > 220 && !analyzing) {
+        status(STATES.changed);
+        look($('q').value || 'Describe the scene and what changed.');
+      } else status(STATES.watching);
+    }, sec * 1000);
+    status('Watch on — analyzing every ' + sec + 's when the scene changes.');
+  };
+  function stopWatch() {
+    if (watchTimer) clearInterval(watchTimer);
+    watchTimer = null;
+    if ($('watch').value !== '0') $('watch').value = '0';
+  }
+
+  /* ---------- gesture shortcuts ---------- */
+  function gestureProbe() {
+    if (!stream || !$('t-gestures').checked) return;
+    const probe = sceneEnergy();
+    const e = probe.e !== undefined ? probe.e : probe;
+    if (e > 260) {
+      gestureBuf.push({ cx: probe.cx, cy: probe.cy, t: performance.now() });
+      gestureBuf = gestureBuf.filter((p) => performance.now() - p.t < 700);
+    }
+    if (gestureBuf.length > 3 && performance.now() - lastGestureAt > 1600) {
+      const dx = gestureBuf[gestureBuf.length - 1].cx - gestureBuf[0].cx;
+      const dy = gestureBuf[gestureBuf.length - 1].cy - gestureBuf[0].cy;
+      if (Math.abs(dx) > 0.9 || Math.abs(dy) > 0.9) {
+        lastGestureAt = performance.now();
+        gestureBuf = [];
+        if (Math.abs(dx) > Math.abs(dy)) {
+          MAX.post('/api/utterance', { text: dx > 0 ? 'volume up' : 'volume down', user: MAX.user() }).catch(() => {});
+          status(dx > 0 ? 'Gesture: volume up' : 'Gesture: volume down');
+        } else if (dy < 0) { status('Gesture: look'); look($('q').value); }
+        else { status('Gesture: stop'); MAX.stopSpeaking(); stopWatch(); }
+      }
+    }
+  }
+
+  /* ---------- results ---------- */
+  function addResult(thumb, text, question) {
+    if (results.querySelector('.muted')) results.innerHTML = '';
+    const card = document.createElement('div');
+    card.className = 'result';
+    const img = document.createElement('img');
+    img.src = thumb; img.alt = 'captured frame';
+    const body = document.createElement('div');
+    body.style.flex = '1';
+    const t = document.createElement('div');
+    t.className = 'r-text';
+    t.textContent = text;
+    const meta = document.createElement('div');
+    meta.className = 'r-meta';
+    const time = document.createElement('time');
+    time.textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + (question ? ' · “' + question.slice(0, 40) + '”' : '');
+    const btn = document.createElement('button');
+    btn.className = 'mini-btn'; btn.type = 'button';
+    btn.title = 'Copy'; btn.setAttribute('aria-label', 'Copy this description');
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+    btn.onclick = async () => {
+      try { await navigator.clipboard.writeText(text); } catch {}
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" style="width:12px;height:12px"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:12px;height:12px"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>'; }, 1500);
+    };
+    meta.append(time, btn);
+    body.append(t, meta);
+    card.append(img, body);
+    results.prepend(card);
+    while (results.children.length > 12) results.lastChild.remove(); // session-only, capped
+  }
+
+  loadMode();
+})();
+</script>
+</body>
+</html>

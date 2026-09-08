@@ -1368,3 +1368,12 @@ checks + 20 highlight + 20 apps + keyring rotation + 24 security + 7 offline**.
 - Older satellites continue to work; to enforce satellite auth, set
   `SATELLITE_TOKEN` on the hub *and* the firmware `HUB_TOKEN` (already plumbed
   into the WS URL and now the hello payload).
+
+## 2026-09-04 — verification and runtime-layout repair
+
+- Restored the executable tree layout expected by runtime imports and tests.
+- Fixed `.env` resolution for the root-level project layout.
+- Fixed allowlisted developer commands failing to locate `node` because the child environment had no `PATH`; secrets remain excluded.
+- Corrected the key-rotation regression fixture so connectivity probes are not counted as LLM requests.
+- Registered the preferences skill and repaired satellite/web asset paths.
+- Full local `npm test` pass: 23 suites/check groups passed with 0 failed assertions.

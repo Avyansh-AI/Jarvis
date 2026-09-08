@@ -242,3 +242,9 @@ the token; it does not by design, and the test now asserts the owner token
 survives a theft attempt. The lockdown test user must be enrolled first —
 unenrolled users return before failure counting, which is *also* correct
 behavior.
+
+## 2026-09-04 verification update
+
+The current executable verification pass ran the security, injection, red-team, chaos, privacy, and systems suites. Relevant results include 24/24 security assertions, 12/12 prompt-injection assertions, 29/29 red-team assertions, and 39/39 chaos assertions. The developer sandbox regression now proves benign `node -e` execution works while `.env`, network modules, child-process access, and kernel-protected operations are blocked.
+
+These results are local simulations and do not establish security against a compromised host, real browser, real Home Assistant deployment, real GitHub token, or physical satellite. A fresh deployment without `MAX_TOKEN` remains LAN-open by design and must be treated as unsafe outside a trusted localhost-only setup.
