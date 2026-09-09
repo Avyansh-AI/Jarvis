@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Systems · Jarvis</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/theme.css">
+<style>
+  .verdict { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .sys-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+  .sys-row:last-child { border-bottom: none; }
+  .sys-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; flex: none; background: var(--line); }
+  .sys-dot.ok { background: var(--teal); box-shadow: 0 0 6px var(--teal); }
+  .sys-dot.warn { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .sys-dot.bad { background: var(--cyan); box-shadow: 0 0 6px var(--cyan-bright); }
+  .sys-body { flex: 1; min-width: 0; }
+  .sys-name { font-weight: 700; font-size: 13px; }
+  .sys-what { font-size: 12px; font-weight: 600; color: var(--ink-dim); }
+  .sys-fix { font-size: 12px; font-weight: 600; color: var(--cyan); margin-top: 2px; }
+  .sys-fix .btn { margin-left: 6px; padding: 2px 8px; font-size: 11px; }
+  .need-sev { text-transform: uppercase; letter-spacing: 1px; font-size: 10px; font-weight: 800; }
+  .need-sev.blocked { color: var(--cyan); }
+  .need-sev.warn { color: var(--red); }
+  .need-sev.info { color: var(--ink-dim); }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="glow-field" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="wordmark" href="index.html">JARVIS</a>
+  <span class="chip" id="hubChip" role="status"><span class="semi-dot"></span><span id="hubChipText">hub</span></span>
+  <span class="spacer"></span>
+  <a class="navlink" href="vision.html">Vision</a>
+  <a class="navlink" href="logs.html">Logs</a>
+  <a class="navlink" href="systems.html">Systems</a>
+  <a class="navlink" href="settings.html">Settings</a>
+</header>
+
+<main class="panel grid">
+  <section class="card" style="grid-column:1/-1" aria-labelledby="s-verdict">
+    <h3 id="s-verdict">Systems readout</h3>
+    <div class="verdict" id="verdict">Probing all systems…</div>
+    <div class="muted" id="verdictSub">Jarvis-style status: every capability, what’s blocking it, and the fix.</div>
+    <div class="toolbar">
+      <button class="btn ghost" id="b-refresh" type="button">Refresh</button>
+      <span class="muted" id="stamp"></span>
+    </div>
+  </section>
+
+  <section class="card" style="grid-column:1/-1" aria-labelledby="s-cap">
+    <h3 id="s-cap">Capabilities</h3>
+    <ul id="sysList"></ul>
+  </section>
+
+  <section class="card" style="grid-column:1/-1" aria-labelledby="s-need">
+    <h3 id="s-need">Hub-reported blockers</h3>
+    <ul id="needList"></ul>
+    <div class="muted" id="needEmpty" style="display:none">The hub reports nothing blocking. Good day to build something.</div>
+  </section>
+  <section class="card" style="grid-column:1/-1" aria-labelledby="d-diag">
+    <h3 id="d-diag">Boot diagnostics — is anything degraded right now?</h3>
+    <ul id="diagList"><li class="muted">Loading…</li></ul>
+    <p class="muted" id="diagMeta" style="margin-top:8px"></p>
+  </section>
+</main>
+
+<script src="js/common.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  function inIframe() { try { return window.self !== window.top; } catch { return true; } }
+  function policyAllows(feature) { // null = browser can't tell
+    const pp = document.permissionsPolicy || document.featurePolicy;
+    if (!pp || !pp.allowsFeature) return null;
+    try { return !!pp.allowsFeature(feature); } catch { return null; }
+  }
+  async function permState(name) { // 'granted' | 'prompt' | 'denied' | null (unsupported)
+    try {
+      if (!navigator.permissions || !navigator.permissions.query) return null;
+      return (await navigator.permissions.query({ name })).state;
+    } catch { return null; }
+  }
+  function wsProbe() {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (ok) => { if (!done) { done = true; try { sock.close(); } catch {} resolve(ok); } };
+      let sock;
+      try {
+        const t = MAX.LS.get('token', '');
+        const u = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/app' + (t ? '?token=' + encodeURIComponent(t) : '');
+        sock = new WebSocket(u);
+      } catch { return resolve(false); }
+      const to = setTimeout(() => finish(false), 3000);
+      sock.onmessage = () => { clearTimeout(to); finish(true); };
+      sock.onerror = () => { clearTimeout(to); finish(false); };
+      sock.onclose = () => { clearTimeout(to); finish(false); };
+    });
+  }
+  function ttsVoices() {
+    return new Promise((resolve) => {
+      if (!('speechSynthesis' in window)) return resolve(null);
+      const v = speechSynthesis.getVoices();
+      if (v.length) return resolve(v);
+      const to = setTimeout(() => resolve(speechSynthesis.getVoices()), 600);
+      speechSynthesis.onvoiceschanged = () => { clearTimeout(to); resolve(speechSynthesis.getVoices()); };
+    });
+  }
+
+  const rows = [];
+  const row = (name, state, what, fix) => rows.push({ name, state, what, fix: fix || '' });
+
+  async function run() {
+    rows.length = 0;
+    $('sysList').innerHTML = '';
+    $('needList').innerHTML = '';
+    $('verdict').textContent = 'Probing all systems…';
+
+    /* --- hub truth first; every later row grades itself against it --- */
+    let S = null;
+    try { S = await MAX.get('/api/status'); } catch {}
+    row('Hub link', S ? 'ok' : 'bad',
+      S ? `Hub v${S.version} online, up ${Math.round(S.uptime / 60)} min, WAN ${S.online ? 'up' : 'down (local mode)'}.` : 'Hub unreachable.',
+      'Start the hub (npm start) and reload this page.');
+    $('hubChip').classList.toggle('on', !!S);
+    $('hubChipText').textContent = S ? 'online' : 'unreachable';
+    if (!S) { finish(); return; }
+
+    const wsOk = await wsProbe();
+    row('Realtime link', wsOk ? 'ok' : 'warn',
+      wsOk ? 'Live socket up — instant replies, alerts and proactive nudges will arrive.' : 'Socket blocked or flaky — chat still works over HTTP, but alerts may lag.',
+      wsOk ? '' : 'A proxy/firewall may be blocking WebSockets; chat works regardless.');
+
+    row('Secure context', window.isSecureContext ? 'ok' : 'bad',
+      window.isSecureContext ? 'Page is served securely — mic/camera are allowed to exist here.' : 'http:// network pages can’t use mic or camera at all.',
+      window.isSecureContext ? '' : 'Open http://localhost:8080 on the hub machine, or serve over https.');
+
+    const micPol = policyAllows('microphone'), camPol = policyAllows('camera');
+    const embedBlocked = inIframe() && (micPol === false || camPol === false);
+    row('Window mode', embedBlocked ? 'warn' : 'ok',
+      embedBlocked ? 'Running inside an embedded preview without sensor permission — mic/camera features are blocked here.'
+        : (inIframe() ? 'Embedded, but sensors are permitted.' : 'Running in its own tab.'),
+      embedBlocked ? 'Open Jarvis in its own browser tab (copy this URL) and everything unlocks.' : '');
+
+    const micPerm = await permState('microphone');
+    const micState = !window.isSecureContext || embedBlocked || micPerm === 'denied' ? 'bad' : micPerm === 'prompt' || micPerm === null ? 'warn' : 'ok';
+    row('Microphone', micState,
+      micPerm === 'granted' ? 'Permission granted — push-to-talk and voice verify are ready.'
+        : micPerm === 'prompt' ? 'Will ask for permission on first use.'
+        : micPerm === 'denied' ? 'You (or browser policy) denied the mic.'
+        : embedBlocked ? 'Blocked by the embedded preview.' : 'This browser can’t report mic state — we’ll find out on use.',
+      micPerm === 'denied' ? 'Click the tune/lock icon by the address bar → allow Microphone → reload.' : (embedBlocked ? 'Open Jarvis in its own tab.' : ''));
+
+    row('Speech recognition', SR ? (micState === 'bad' ? 'warn' : 'ok') : 'warn',
+      SR ? 'Browser STT available (Chrome/Edge cloud service).' : 'This browser has no SpeechRecognition — voice input unavailable; typing always works.',
+      SR ? (micState === 'bad' ? 'Fix the microphone row above first.' : '') : 'Use Chrome/Edge for voice, or keep typing.');
+
+    row('Wake word', SR && micState !== 'bad' ? 'ok' : 'warn',
+      SR && micState !== 'bad' ? '“Hey Jarvis” can listen in the background (toggle on the main page).' : 'Depends on speech recognition + mic — blocked until those rows are green.',
+      SR && micState !== 'bad' ? '' : 'Fix the microphone/recognition rows above.');
+
+    /* brains */
+    row('Cloud brain', S.brain !== 'cloud' ? 'warn' : S.openrouter.keys === 0 ? 'bad' : S.openrouter.lastFail ? 'warn' : 'ok',
+      S.brain !== 'cloud' ? 'Off by choice — brain is set to ' + S.brain + '.'
+        : S.openrouter.keys === 0 ? 'No OpenRouter keys configured — chat falls back to intent skills only.'
+        : S.openrouter.lastFail ? `${S.openrouter.keys} key(s) loaded, but a key was rejected recently (${S.openrouter.lastFail.status === 402 ? 'free-tier credit/prompt token cap hit' : S.openrouter.lastFail.status === 401 ? 'unauthorized — invalid/revoked' : 'HTTP ' + (S.openrouter.lastFail.status || S.openrouter.lastFail.reason || 'error')}).`
+        : `${S.openrouter.keys} key(s) rotating${S.openrouter.model ? ' · ' + S.openrouter.model : ''}.`,
+      S.brain !== 'cloud' ? '' : S.openrouter.keys === 0 ? 'Settings → OpenRouter Keys to add a key.' : (S.openrouter.lastFail ? (S.openrouter.lastFail.status === 402 ? 'Add credit, or pick a smaller free model — chat answers lean-mode meanwhile.' : 'Top up credit or replace/re-rotate keys in Settings → OpenRouter Keys.') : ''));
+    row('Local brain', S.ollama.reachable === true ? 'ok' : (S.brain === 'local' ? 'bad' : 'warn'),
+      S.ollama.reachable === true ? `Ollama reachable at ${S.ollama.url || 'default address'}.`
+        : S.ollama.url ? `Ollama not answering at ${S.ollama.url} — local + hacking modes will fall back.` : 'Ollama not configured.',
+      S.brain === 'local' && S.ollama.reachable === false ? 'Start Ollama (`ollama serve`) or switch the brain to cloud.' : (S.ollama.reachable === false && S.ollama.url ? 'Only needed for local/hacking modes — start it when you need it.' : ''));
+
+    /* senses + outputs */
+    const camPerm = await permState('camera');
+    row('Camera', camPerm === 'denied' || (!window.isSecureContext) || (inIframe() && camPol === false) ? 'bad' : camPerm === 'granted' ? 'ok' : 'warn',
+      camPerm === 'granted' ? 'Permission granted — Vision page is ready.'
+        : camPerm === 'denied' ? 'Camera permission denied.'
+        : !window.isSecureContext ? 'No secure context — camera cannot run here.'
+        : (inIframe() && camPol === false) ? 'Blocked by the embedded preview.' : 'Will ask for permission when you start the camera.',
+      camPerm === 'denied' ? 'Lock/tune icon → allow Camera → reload.' : ((inIframe() && camPol === false) ? 'Open Jarvis in its own tab.' : (window.isSecureContext ? '' : 'Use localhost or https.')));
+
+    const voices = await ttsVoices();
+    const textOnly = MAX.LS.get('textOnly', false);
+    row('Voice output', textOnly ? 'warn' : voices === null ? 'warn' : voices.length ? 'ok' : 'warn',
+      textOnly ? 'Text-only mode is ON — I stay silent by choice. Speech synthesis itself is ' + (voices && voices.length ? 'fine.' : 'also unavailable.')
+        : voices === null ? 'This browser has no speech synthesis — replies are text-only.' : voices.length ? `${voices.length} system voice(s) ready.` : 'No voices found — replies stay silent until one is installed.',
+      textOnly ? 'Settings → Text-only mode, if you want sound back.' : (voices && voices.length ? '' : 'Install any system voice (OS speech settings).'));
+
+    const notifyOn = MAX.LS.get('notifications', false);
+    const notifPerm = ('Notification' in window) ? Notification.permission : 'unsupported';
+    row('Notifications', !notifyOn ? 'warn' : notifPerm === 'granted' ? 'ok' : 'warn',
+      !notifyOn ? 'Off in Settings by choice — reminders will only toast in-page.' : notifPerm === 'granted' ? 'System notifications will fire for alarms and nudges.' : 'Enabled but the browser won’t show them (' + notifPerm + ').',
+      !notifyOn ? '' : (notifPerm === 'denied' ? 'Lock/tune icon → allow Notifications.' : 'Tap Settings → System notifications to re-request.'));
+
+    /* hub-managed capabilities */
+    row('Voice verification', S.security.lockedUsers.length ? 'bad' : S.security.anyVoiceprint ? 'ok' : 'warn',
+      S.security.lockedUsers.length ? `Frozen for ${S.security.lockedUsers.map((l) => l.user).join(', ')} (${S.security.lockedUsers[0].secondsLeft}s left) after repeated failures.`
+        : S.security.anyVoiceprint ? 'A voiceprint is enrolled — locks/garage/finance can be voice-gated.' : 'No voiceprint enrolled yet.',
+      S.security.lockedUsers.length ? 'Wait out the freeze; check Logs → Security alerts for who probed you.' : (S.security.anyVoiceprint ? '' : 'Settings → Voice → enroll. Best-effort only — keep MAX_TOKEN on.'));
+
+    row('Satellites', S.satellites.total === 0 ? 'warn' : S.satellites.online === S.satellites.total ? 'ok' : 'warn',
+      S.satellites.total === 0 ? 'No ESP32 satellites paired yet (optional room sensors/presence).' : `${S.satellites.online}/${S.satellites.total} online.`,
+      S.satellites.total === 0 ? 'Flash satellite/esp32 and set SATELLITE_TOKEN to pair.' : 'Check power/Wi-Fi on offline units; see Dashboard.');
+
+    row('Backups', !S.backup.lastAt ? 'warn' : (Date.now() - S.backup.lastAt > 7 * 86400e3 ? 'warn' : 'ok'),
+      S.backup.lastAt ? `Latest backup ${new Date(S.backup.lastAt).toLocaleString()}.` : 'No backup archive found — encrypted memories and keys have no restore point.',
+      S.backup.lastAt && Date.now() - S.backup.lastAt <= 7 * 86400e3 ? '' : 'Run scripts/backup.sh, plus one manual copy of data/.master.key.');
+
+    row('API guard', S.security.tokenRequired ? 'ok' : 'warn',
+      S.security.tokenRequired ? 'MAX_TOKEN set — API + sockets require auth.' : 'No MAX_TOKEN — anyone on this network can talk to the hub.',
+      S.security.tokenRequired ? '' : 'Set MAX_TOKEN in .env and restart the hub.');
+
+    renderNeeds(S);
+    finish();
+  }
+
+  function renderNeeds(S) {
+    const ul = $('needList');
+    ul.innerHTML = '';
+    const needs = (S && S.needs) || [];
+    $('needEmpty').style.display = needs.length ? 'none' : '';
+    for (const n of needs) {
+      const li = document.createElement('li');
+      li.innerHTML = '<span class="need-sev ' + n.severity + '">' + n.severity + '</span> ';
+      const what = document.createElement('span'); what.textContent = n.what + ' ';
+      const fix = document.createElement('span'); fix.className = 'sys-fix'; fix.textContent = '→ ' + n.fix;
+      li.append(what, fix);
+      ul.appendChild(li);
+    }
+  }
+
+  function finish() {
+    const bad = rows.filter((r) => r.state === 'bad').length;
+    const warn = rows.filter((r) => r.state === 'warn').length;
+    $('verdict').textContent = bad ? `${bad} system${bad > 1 ? 's' : ''} need${bad > 1 ? '' : 's'} attention${warn ? `, ${warn} note${warn > 1 ? 's' : ''}` : ''}.`
+      : warn ? `Operational — ${warn} note${warn > 1 ? 's' : ''} worth a look.` : 'All systems nominal.';
+    $('stamp').textContent = 'checked ' + new Date().toLocaleTimeString();
+    const ul = $('sysList');
+    ul.innerHTML = '';
+    for (const r of rows) {
+      const li = document.createElement('li');
+      li.className = 'sys-row';
+      const dot = document.createElement('span'); dot.className = 'sys-dot ' + r.state;
+      const body = document.createElement('div'); body.className = 'sys-body';
+      const nm = document.createElement('div'); nm.className = 'sys-name'; nm.textContent = r.name;
+      const wh = document.createElement('div'); wh.className = 'sys-what'; wh.textContent = r.what;
+      body.append(nm, wh);
+      if (r.fix) { const fx = document.createElement('div'); fx.className = 'sys-fix'; fx.textContent = '→ ' + r.fix; body.append(fx); }
+      li.append(dot, body);
+      ul.appendChild(li);
+    }
+  }
+
+  $('b-refresh').onclick = run;
+  run();
+  setInterval(run, 30000);
+  /* boot diagnostics card — the /api/diagnostics readiness report, visible */
+  MAX.get('/api/diagnostics').then((d) => {
+    const ICON = { ok: '✓', warn: '⚠', fail: '✗' };
+    const clean = (s) => String(s ?? '').replace(/[<>&]/g, '');
+    $('diagList').innerHTML = (d.checks || []).map((c) =>
+      `<li class="sys-row" style="display:flex;gap:8px;align-items:baseline">${ICON[c.ok] || '·'} <b>${clean(c.name)}</b>${c.detail ? ` <span class="muted">— ${clean(c.detail)}</span>` : ''}</li>`
+    ).join('') || '<li class="muted">No boot checks recorded.</li>';
+    $('diagMeta').textContent = d.summary
+      ? `readiness ${d.summary.ok}/${d.summary.total} ok · ${d.summary.warns} warning(s) · ${d.summary.fails} failure(s) · hub v${d.version} · up ${d.uptimeSec}s${d.debug ? ' · MAX_DEBUG on' : ''}`
+      : '';
+  }).catch(() => { $('diagList').innerHTML = '<li class="muted">Hub unreachable.</li>'; });
+
+})();
+</script>
+</body>
+</html>

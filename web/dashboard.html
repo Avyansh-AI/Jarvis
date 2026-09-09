@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jarvis Remote · Jarvis</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/theme.css">
+<style>
+  .hero { display: flex; align-items: center; gap: 18px; margin-bottom: 18px; }
+  .hero .clock { font-size: 44px; font-weight: 700; }
+  .hero .date { color: var(--ink-dim); font-weight: 600; }
+  .camera-thumb { aspect-ratio: 16/10; border-radius: 14px; background: var(--line); display: flex; align-items: center; justify-content: center; color: var(--ink-dim); font-size: 12px; font-weight: 700; letter-spacing: 2px; overflow: hidden; }
+  .camera-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .pin-lock { position: fixed; inset: 0; z-index: 90; display: none; align-items: center; justify-content: center; background: rgba(2, 6, 14, 0.97); }
+  .pin-lock.open { display: flex; }
+  .pin-card { text-align: center; }
+  .pin-card input { font: inherit; font-size: 22px; letter-spacing: 6px; text-align: center; width: 200px; padding: 10px; border: 2px solid var(--line); border-radius: 12px; background: rgba(4, 16, 31, 0.85); }
+  .act-time { color: var(--ink-dim); font-size: 11px; font-weight: 700; }
+  .dev-pill { float: right; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
+  .dev-pill.on { color: var(--teal); } .dev-pill.off { color: var(--ink-dim); }
+</style>
+</head>
+<body>
+<div class="glow-field" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="wordmark" href="index.html">JARVIS</a>
+  <span class="spacer"></span>
+  <a class="navlink" href="index.html">Talk</a>
+  <a class="navlink" href="vision.html">Vision</a>
+  <a class="navlink active" href="dashboard.html">Jarvis&nbsp;Remote</a>
+  <a class="navlink" href="logs.html">Logs</a>
+  <a class="navlink" href="systems.html">Systems</a>
+  <a class="navlink" href="settings.html">Settings</a>
+</header>
+
+<main class="panel">
+  <div class="pin-lock" id="pinLock" role="dialog" aria-label="Jarvis Remote locked">
+  <form class="pin-card" id="pinForm">
+    <div class="wordmark" style="font-size:34px">JARVIS<em>·REMOTE</em></div>
+    <p class="muted">This terminal is PIN-locked by the owner.</p>
+    <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="••••" aria-label="PIN">
+    <p><button class="btn primary" type="submit">Unlock</button></p>
+    <p class="muted" id="pinMsg"></p>
+  </form>
+</div>
+
+<div class="hero">
+    <button class="ring-wrap mini standby" id="ringWrap" aria-label="Open talk view" onclick="location.href='index.html'">
+      <svg viewBox="0 0 260 300" aria-hidden="true">
+        <ellipse class="ring-outline" cx="130" cy="150" rx="100" ry="120" />
+        <ellipse class="core-fill" cx="130" cy="150" rx="100" ry="120" />
+        <ellipse class="ring-glow" cx="130" cy="150" rx="100" ry="120" />
+      </svg>
+      <div class="core-label" aria-hidden="true">JARVIS</div>
+      <div class="status-pill" aria-hidden="true"><span class="dot"></span></div>
+    </button>
+    <div>
+      <div class="clock" id="clock">–:–</div>
+      <div class="date" id="date">—</div>
+    </div>
+    <span class="spacer"></span>
+    <button class="btn primary" id="b-brief">Daily briefing</button>
+  </div>
+
+  <div class="grid">
+    <section class="card" aria-labelledby="d-weather">
+      <h3 id="d-weather">Weather</h3>
+      <div id="weatherBody"><span class="muted">Loading…</span></div>
+    </section>
+
+    <section class="card" aria-labelledby="d-cal">
+      <h3 id="d-cal">Today &amp; upcoming</h3>
+      <ul id="calList"><li class="muted">Loading…</li></ul>
+    </section>
+
+    <section class="card" aria-labelledby="d-sensors">
+      <h3 id="d-sensors">Sensors &amp; rooms</h3>
+      <ul id="sensorList"><li class="muted">No data yet — satellites report here.</li></ul>
+    </section>
+
+    <section class="card" aria-labelledby="d-sats">
+      <h3 id="d-sats">Satellites</h3>
+      <ul id="satList"><li class="muted">No ESP32 nodes connected yet.</li></ul>
+    </section>
+
+    <section class="card" aria-labelledby="d-cam">
+      <h3 id="d-cam">Cameras</h3>
+      <div class="grid" id="camGrid" style="grid-template-columns:1fr 1fr">
+        <div class="camera-thumb">OFF · privacy first</div>
+      </div>
+      <p class="muted" style="margin-top:8px">Enable cameras in Settings; snapshots load only from your local network.</p>
+    </section>
+
+    <section class="card" aria-labelledby="d-next">
+      <h3 id="d-next">Coming up</h3>
+      <ul id="schedList"><li class="muted">Loading…</li></ul>
+    </section>
+
+    <section class="card" aria-labelledby="d-home">
+      <h3 id="d-home">Home</h3>
+      <ul id="homeList"><li class="muted">Loading…</li></ul>
+      <p class="muted" style="margin-top:8px">Taps route through the full voice pipeline — voice-gated devices (locks/garage) stay gated.</p>
+    </section>
+
+    <section class="card" aria-labelledby="d-act" style="grid-column:1/-1">
+      <h3 id="d-act">Activity feed — what Jarvis is doing</h3>
+      <ul id="actList"><li class="muted">Listening for activity…</li></ul>
+    </section>
+  </div>
+</main>
+
+<script src="js/common.js"></script>
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+
+  /* ---- PIN gate (household-grade; MAX_TOKEN is the real API auth) ---- */
+  try {
+    const st = await MAX.get('/api/settings');
+    const gated = !!(st.features && st.features.remotePass); // value is masked; length unknown → probe only flag
+    if (gated && sessionStorage.getItem('maxRemoteUnlocked') !== '1') $('pinLock').classList.add('open');
+    $('pinForm').onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await MAX.post('/api/remote/unlock', { pin: $('pinInput').value });
+        sessionStorage.setItem('maxRemoteUnlocked', '1');
+        $('pinLock').classList.remove('open');
+      } catch { $('pinMsg').textContent = 'Wrong PIN — try again.'; $('pinInput').select(); }
+    };
+  } catch { /* settings unreachable — hub-down flow below handles it */ }
+
+  const relTime = (ts) => {
+    const d = Math.max(0, Date.now() - ts);
+    return d < 60e3 ? 'just now' : d < 3600e3 ? Math.round(d / 60e3) + 'm ago' : d < 86400e3 ? Math.round(d / 3600e3) + 'h ago' : new Date(ts).toLocaleDateString();
+  };
+  const ACT_ICON = { interaction: '💬', 'schedule.fired': '⏰', notify: '🔔', attention: '❗', 'security.lockdown': '🔒', 'security.denied': '🚫', 'satellite.swap': '🛰', 'llm.key.fail': '🔑', 'sos.triggered': '🆘', 'injection.guard': '🛡', 'voiceprint.enrolled': '🎙' };
+  const actLabel = (e) => e.message || (e.skill ? (e.ok === false ? e.skill + ' slipped' : e.skill + ' handled a request') : e.type);
+  function renderActivity(items) {
+    $('actList').innerHTML = items.length ? items.map((e) =>
+      `<li><span aria-hidden="true">${ACT_ICON[e.type] || '·'}</span> <span class="act-time">${relTime(e.ts)}</span> ${String(actLabel(e)).replace(/[<>&]/g, '')}${e.user ? ' <span class="act-time">(' + String(e.user).replace(/[<>&]/g, '') + ')</span>' : ''}</li>`
+    ).join('') : '<li class="muted">Quiet so far — ask Jarvis for something and watch this feed.</li>';
+  }
+  async function loadActivity() { try { renderActivity((await MAX.get('/api/activity?n=20')).items); } catch {} }
+
+  /* ---- home panel: read inventory; taps go through the voice pipeline ---- */
+  async function loadHome() {
+    try {
+      const h = await MAX.get('/api/home/devices');
+      if (!h.configured) { $('homeList').innerHTML = '<li class="muted">Home Assistant isn’t configured — Settings → Smart home.</li>'; return; }
+      if (h.error) { $('homeList').innerHTML = `<li class="muted">HA says: ${String(h.error).replace(/[<>&]/g, '')}</li>`; return; }
+      if (!h.devices.length) { $('homeList').innerHTML = '<li class="muted">No lights/fans/plugs/TVs found in HA.</li>'; return; }
+      $('homeList').innerHTML = h.devices.map((d) =>
+        `<li><button class="btn ghost" style="padding:2px 8px" data-dev="${d.id.replace(/"/g, '')}" data-on="${d.state === 'on' ? 1 : 0}">${d.state === 'on' ? 'Turn off' : 'Turn on'}</button> <span class="dev-pill ${d.state === 'on' ? 'on' : 'off'}">${d.state}</span> ${d.name.replace(/[<>&]/g, '')}</li>`
+      ).join('');
+      $('homeList').querySelectorAll('button').forEach((b) => {
+        b.onclick = async () => {
+          b.disabled = true;
+          try {
+            const name = b.parentElement.textContent.replace(/^(Turn off|Turn on)/, '').trim();
+            const r = await MAX.post('/api/utterance', { user: MAX.LS.get('user', 'remote'), text: (b.dataset.on === '1' ? 'turn off ' : 'turn on ') + name });
+            if (r && r.verify) toastMini('That device is voice-gated — verify on the main page first.');
+            setTimeout(loadHome, 1200);
+          } catch { } finally { b.disabled = false; }
+        };
+      });
+    } catch { $('homeList').innerHTML = '<li class="muted">Hub unreachable.</li>'; }
+  }
+  function toastMini(text) {
+    const el = document.createElement('div'); el.className = 'chip warn'; el.textContent = text;
+    el.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:99';
+    document.body.appendChild(el); setTimeout(() => el.remove(), 4000);
+  }
+
+  function tick() {
+    const n = new Date();
+    $('clock').textContent = n.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    $('date').textContent = n.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+  tick(); setInterval(tick, 1000);
+
+  async function loadWeather() {
+    try {
+      const w = await MAX.get('/api/weather');
+      $('weatherBody').innerHTML = `
+        <div class="big">${w.tempC}°</div>
+        <div class="muted">${w.desc} · feels ${w.feelsC}° · H ${w.highC}° / L ${w.lowC}°</div>
+        <div class="muted">Rain ${w.rainPct}% · wind ${w.windKph} km/h · ${w.city}</div>`;
+    } catch (e) {
+      $('weatherBody').innerHTML = `<span class="muted">${e.message.includes('city') ? 'Set a home city in Settings.' : 'Weather unavailable (offline?).'}</span>`;
+    }
+  }
+
+  async function loadCalendar() {
+    try {
+      const evts = await MAX.get('/api/calendar');
+      const now = Date.now();
+      const soon = evts.filter((e) => e.start > now - 3600e3).slice(0, 6);
+      $('calList').innerHTML = soon.length
+        ? soon.map((e) => `<li><b>${new Date(e.start).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</b> — ${e.title}</li>`).join('')
+        : '<li class="muted">Nothing scheduled. Say “add event Friday 3pm dentist”.</li>';
+    } catch { $('calList').innerHTML = '<li class="muted">Hub unreachable.</li>'; }
+  }
+
+  async function loadSchedule() {
+    try {
+      const jobs = await MAX.get('/api/schedule');
+      $('schedList').innerHTML = jobs.length
+        ? jobs.slice(0, 6).map((j) => `<li><b>${j.kind}</b> — ${j.label} <span class="muted">${new Date(j.at).toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', weekday: 'short' })}${j.repeat ? ' · ' + j.repeat : ''}</span></li>`).join('')
+        : '<li class="muted">No timers, alarms, or reminders.</li>';
+    } catch {}
+  }
+
+  function renderSensors(data) {
+    const entries = Object.entries(data || {});
+    $('sensorList').innerHTML = entries.length
+      ? entries.map(([src, s]) => {
+          const bits = [];
+          if (s.temperature != null) bits.push(`${s.temperature}°C`);
+          if (s.humidity != null) bits.push(`${s.humidity}% RH`);
+          if (s.motion != null) bits.push(s.motion ? 'motion' : 'still');
+          if (s.presence != null) bits.push(s.presence ? 'presence' : 'away');
+          if (s.air != null) bits.push('AQI ' + s.air);
+          const age = s.at ? Math.round((Date.now() - s.at) / 60000) : null;
+          return `<li><b>${src}</b> — ${bits.join(' · ') || 'reported in'}${age != null ? ` <span class="muted">${age}m ago</span>` : ''}</li>`;
+        }).join('')
+      : '<li class="muted">No data yet — satellites report here.</li>';
+  }
+
+  async function loadSensors() { try { renderSensors(await MAX.get('/api/sensors')); } catch {} }
+
+  async function loadSats() {
+    try {
+      const sats = await MAX.get('/api/satellites');
+      $('satList').innerHTML = sats.length
+        ? sats.map((s) => `<li><b>${s.name}</b> <span class="${s.online ? 'pill-ok' : 'pill-bad'}">${s.online ? 'online' : 'offline'}</span>${s.queued ? ` · ${s.queued} queued` : ''}<br><span class="muted">${Object.keys(s.caps || {}).join(', ') || 'audio node'}</span></li>`).join('')
+        : '<li class="muted">No ESP32 nodes connected yet.</li>';
+    } catch {}
+  }
+
+  async function loadCams() {
+    try {
+      const s = await MAX.get('/api/settings');
+      const cams = s.cameras || [];
+      if (!cams.length) return;
+      $('camGrid').innerHTML = cams.map((c) => `<div class="camera-thumb"><img src="${c.url}" alt="${c.name}" loading="lazy" onerror="this.parentElement.textContent='${c.name} — unreachable'"></div>`).join('');
+    } catch {}
+  }
+
+  $('b-brief').onclick = async () => {
+    $('b-brief').textContent = 'Speaking…';
+    try {
+      const res = await MAX.post('/api/utterance', { text: 'briefing', user: MAX.user() });
+      MAX.speak(res.say, {});
+    } catch { alert('Hub unreachable'); }
+    $('b-brief').textContent = 'Daily briefing';
+  };
+
+  /* live updates */
+  try {
+    const ws = new WebSocket(MAX.wsUrl('/ws/app'));
+    ws.onmessage = (e) => {
+      let msg; try { msg = JSON.parse(e.data); } catch { return; }
+      if (msg.type === 'sensor') { MAX.get('/api/sensors').then(renderSensors); }
+      else if (msg.type === 'notify') { loadSchedule(); loadActivity(); }
+      else if (msg.type === 'alert') loadActivity();
+    };
+  } catch {}
+
+  loadWeather(); loadCalendar(); loadSchedule(); loadSensors(); loadSats(); loadCams(); loadActivity(); loadHome();
+  setInterval(() => { loadWeather(); loadCalendar(); loadSchedule(); loadSats(); }, 60000);
+  setInterval(loadActivity, 10000);
+})();
+</script>
+</body>
+</html>

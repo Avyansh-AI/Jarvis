@@ -1,0 +1,68 @@
+# Jarvis — ESPHome satellite (alternative to the custom .ino firmware)
+# Sensors + presence are fully native here; wake/audio streaming is handled
+# by the custom firmware (../esp32/jarvis_satellite) since ESPHome's voice
+# pipeline targets HA Assist rather than the Jarvis hub.
+esphome:
+  name: jarvis-sat-livingroom
+  friendly_name: "Jarvis Living Room"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: "YOUR_WIFI"
+  password: "YOUR_WIFI_PASSWORD"
+
+logger:
+
+# Talk to the Jarvis hub: sensors post straight to its ingest endpoint.
+http_request:
+  useragent: jarvis-satellite/1.0
+  timeout: 5s
+
+sensor:
+  - platform: dht
+    pin: GPIO15
+    model: DHT22
+    temperature:
+      name: "Room temperature"
+      id: room_temp
+    humidity:
+      name: "Room humidity"
+      id: room_hum
+    update_interval: 30s
+  - platform: wifi_signal
+    name: "WiFi signal"
+    update_interval: 60s
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO13
+      mode: INPUT_PULLDOWN
+    name: "Motion"
+    device_class: motion
+    id: room_pir
+    on_state:
+      - script.execute: push_telemetry
+
+interval:
+  - interval: 30s
+    then:
+      - script.execute: push_telemetry
+
+script:
+  - id: push_telemetry
+    then:
+      - http_request.post:
+          url: http://192.168.1.10:8080/api/sensors
+          headers: { 'content-type': 'application/json' }
+          json:
+            source: esphome-livingroom
+            data:
+              temperature: !lambda 'return id(room_temp).state;'
+              humidity: !lambda 'return id(room_hum).state;'
+              motion: !lambda 'return id(room_pir).state;'
+              presence: !lambda 'return id(room_pir).state;'

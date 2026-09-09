@@ -62,3 +62,7 @@ a hope.
 
 **How to re-run everything:** `npm test` (9 suites, 183 checks —
 module checks, backup/restore, security, red-team, chaos).
+
+## 2026-09-04 verification update
+
+The full local failure suite completed successfully after correcting the flattened source-tree paths and the key-rotation fixture's unauthenticated connectivity probe. Chaos coverage passed for cloud outage, malformed/500 responses, satellite loss, service outages, disk-full writes, corrupted stores, scheduler recovery, lockdown persistence, and watchdog behavior. External hardware/provider behavior remains unverified.

@@ -3,3 +3,10 @@
 data/
 node_modules/
 nohup.out
+.master.key
+settings.enc.json
+settings.enc.json.bak
+.env.backup
+
+# Runtime/generated output
+files/
