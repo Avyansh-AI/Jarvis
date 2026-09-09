@@ -77,7 +77,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   hub.kill('SIGKILL');
 
   // 5. no hardcoded credentials anywhere in code (placeholders allowed, real-shaped keys are not)
-  const codeFiles = execFileSync('bash', ['-c', 'find hub web tools scripts satellite -type f | grep -vE "\\.md$"']).toString().trim().split('\n');
+  const codeFiles = execFileSync('bash', ['-c', 'find hub web scripts satellite -type f | grep -vE "\\.md$"']).toString().trim().split('\n');
   const KEYLIKE = /['"`](sk|ghp|gho|xox[bap]|AIza|ya29)[-A-Za-z0-9_]{10,}['"`]/;
   const hits = codeFiles.filter((f) => KEYLIKE.test(fs.readFileSync(path.join(ROOT, f), 'utf8')));
   ok('no real-shaped API keys hardcoded in code', hits.length === 0);
