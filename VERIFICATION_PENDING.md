@@ -57,6 +57,26 @@ Required verification:
 - Confirm it explains what failed, the likely cause, and the current recovery action without exposing credentials.
 - Record the date, failure type, and observed message here.
 
+## Verification attempts — 2026-09-09
+
+The four checks were attempted from the Arena environment. No item is marked confirmed without the required live evidence.
+
+### OpenRouter degrade-confirmation — NOT YET VERIFIED
+
+The checkout has no `.env` and no `OPENROUTER_KEY_1/2/3` values were available to this session. The process environment did not expose OpenRouter keys either. Therefore no real OpenRouter request, invalidation, exhaustion, rate-limit, or user-facing downgrade prompt could be performed.
+
+### Ollama process spawning — NOT YET VERIFIED
+
+`ollama` is not installed or on `PATH` in the Arena environment, and no `ollama serve` process was present. Neither the topic-triggered nor failure-triggered path could produce a real process or `ps` evidence.
+
+### GitHub write confirmation — NOT YET VERIFIED
+
+GitHub authentication is available, but the only available repository is `Avyansh-AI/Jarvis`; it was not treated as a disposable test repository. No issue, comment, PR, merge, push, or other live write was attempted. The safety requirement takes precedence over producing a write demo against a real project.
+
+### Live diagnostics message — NOT YET VERIFIED
+
+No live provider credential or safe external integration target was available for a controlled real failure. The diagnostics suite uses simulated/mocked failures, which are not sufficient for this item, so no live message is claimed.
+
 ## Current evidence boundary
 
-All four items pass their code-level regression tests. None has been exercised against a real external service or physical hardware. Do not remove this file or mark an item confirmed until a manual verification records the date and how it was checked.
+All four items pass their code-level regression tests. None has been exercised against a real external service or physical hardware. Do not remove this file or mark an item confirmed until a manual verification records the date, method, and captured evidence.
