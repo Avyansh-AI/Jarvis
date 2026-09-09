@@ -75,9 +75,12 @@ Manual procedure: see `LIVE_VERIFICATION_RUNBOOK.md`, section 2.
 
 ### GitHub write confirmation — NOT YET VERIFIED
 
-GitHub authentication is available, but creating a private disposable repository failed with GitHub's `Resource not accessible by integration (createRepository)` error. The only available repository is `Avyansh-AI/Jarvis`; it was not treated as disposable, so no issue, comment, PR, merge, push, or other live write was attempted. The safety requirement takes precedence over producing a write demo against a real project.
+Two safe attempts were made on 2026-09-09:
 
-Manual procedure: create a private repository with a human-authorized account, then follow the write-confirmation steps in `LIVE_VERIFICATION_RUNBOOK.md`, section 3.
+1. Creating the private disposable repository `Avyansh-AI/jarvis-verification-scratch` failed with GitHub's exact response: `Resource not accessible by integration (createRepository)`.
+2. A running Jarvis instance was started without a GitHub integration token and sent a create-issue request targeting `Avyansh-AI/Jarvis`. The real application responded: `I'm offline and in local mode. I can still do timers, reminders, alarms, notes and basic smart-home actions.` It did not reach the GitHub write-confirmation flow or mutate the repository. No direct API workaround was attempted.
+
+Because no safe disposable repository was available and the application lacked configured GitHub credentials, no live issue was created, closed, or deleted. The write-confirmation behavior remains unverified. Manual procedure: create a private repository with a human-authorized account, then follow `LIVE_VERIFICATION_RUNBOOK.md`, section 3.
 
 ### Live diagnostics message — NOT YET VERIFIED
 
