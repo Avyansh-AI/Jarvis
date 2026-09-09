@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="85%">
+      <stop offset="0%" stop-color="#071C30"/>
+      <stop offset="55%" stop-color="#04101F"/>
+      <stop offset="100%" stop-color="#02060E"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <ellipse cx="256" cy="256" rx="122" ry="146" fill="none" stroke="rgba(231,244,255,0.85)" stroke-width="3"/>
+  <ellipse cx="256" cy="256" rx="122" ry="146" fill="#3CE0FF" opacity="0.05"/>
+  <ellipse cx="256" cy="256" rx="122" ry="146" fill="none" stroke="#3CE0FF" stroke-width="17" stroke-linecap="round" stroke-dasharray="757" stroke-dashoffset="196" transform="rotate(-90 256 256)" style="filter:drop-shadow(0 0 10px rgba(157,241,255,0.8)) drop-shadow(0 0 24px rgba(60,224,255,0.35))"/>
+  <text x="263" y="268" text-anchor="middle" font-family="'Avenir Next','Futura','Century Gothic','Segoe UI',sans-serif" font-size="36" font-weight="500" letter-spacing="14" fill="#DCEBF5">JARVIS</text>
+</svg>

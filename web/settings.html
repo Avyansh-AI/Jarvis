@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jarvis — Settings</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/theme.css">
+</head>
+<body>
+<div class="glow-field" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="wordmark" href="index.html">JARVIS</a>
+  <span class="spacer"></span>
+  <a class="navlink active" href="settings.html">Settings</a>
+  <a class="navlink" href="systems.html">Systems</a>
+  <a class="navlink" href="vision.html">Vision</a>
+  <a class="navlink" href="logs.html">Logs</a>
+</header>
+
+<main class="panel">
+  <h1 style="font-size:22px;letter-spacing:3px;margin-bottom:4px">Settings</h1>
+  <p class="hint" style="margin-bottom:18px">Everything is stored encrypted on your hub. Camera, mic, and location ship off until you opt in.</p>
+
+  <div class="grid">
+    <section class="card" aria-labelledby="s-general">
+      <h3 id="s-general">Assistant</h3>
+      <div class="field"><label for="f-name">Assistant name</label><input id="f-name" type="text" placeholder="Jarvis"></div>
+      <div class="field"><label for="f-city">Home city (weather / briefing)</label><input id="f-city" type="text" placeholder="Ambala"></div>
+      <div class="field"><label for="f-tz">Hub timezone</label><input id="f-tz" type="text" placeholder="Asia/Kolkata">
+        <span class="desc">IANA name, e.g. Asia/Kolkata (IST). Applies to times, alarms, and the briefing — no restart needed.</span></div>
+      <div class="field"><label for="f-user">You are</label>
+        <select id="f-user" aria-describedby="d-user"></select>
+        <span class="desc" id="d-user">Per-user memory, tone, and permissions. New users appear here after their first chat.</span>
+      </div>
+      <div class="field"><label for="f-token">Hub token (optional)</label><input id="f-token" type="password" autocomplete="off" placeholder="••••••">
+        <span class="desc">If MAX_TOKEN is set on the hub, enter it here once per device.</span></div>
+    </section>
+
+    <section class="card" aria-labelledby="s-keys">
+      <h3 id="s-keys">OpenRouter Keys</h3>
+      <p class="desc">Rotating keys live exclusively in <code>.env</code> on the hub as <code>OPENROUTER_KEY_1</code>, <code>OPENROUTER_KEY_2</code>, <code>OPENROUTER_KEY_3</code> — they are never shown here and cannot be edited from any UI. Edit the file and restart the hub to change them. The boot preflight refuses to start if any of the three variables is missing.</p>
+      <div class="field"><label for="k-model">Model id (optional, overrides default)</label><input id="k-model" type="text" placeholder="anthropic/claude-sonnet-4-5"></div>
+    </section>
+
+    <section class="card" aria-labelledby="s-voice">
+      <h3 id="s-voice">Voice &amp; Speech</h3>
+      <div class="field"><label for="f-voice">Speaking voice (“Jarvis”)</label><select id="f-voice"></select></div>
+      <div class="field"><label for="f-rate">Rate</label><input id="f-rate" type="range" min="0.6" max="1.4" step="0.05"></div>
+      <div class="field"><label for="f-pitch">Pitch</label><input id="f-pitch" type="range" min="0.6" max="1.5" step="0.05"></div>
+      <div class="row"><button class="btn" id="b-testvoice">Test voice</button></div>
+      <div class="row" style="margin-top:12px"><span class="desc" style="flex:1">Text-only mode (no sound)</span><span class="switch"><input id="t-textonly" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Voice match enrolled (experimental)</span><span class="row" style="gap:6px"><button class="btn ghost" id="b-delvoice" type="button">Forget voice</button><button class="btn ghost" id="b-enroll" title="Best-effort voice check, not a certified security system">Enroll</button></span></div>
+      <p class="desc" id="enrollStatus">Voice verification is best-effort — not a certified security system.</p>
+    </section>
+
+    <section class="card" aria-labelledby="s-personality">
+      <h3 id="s-personality">Personality &amp; Proactivity</h3>
+      <div class="field"><label for="f-tone">Tone: clinical ↔ playful</label><input id="f-tone" type="range" min="0" max="1" step="0.05"></div>
+      <div class="row"><span class="desc" style="flex:1">Proactive suggestions</span><span class="switch"><input id="t-proactive" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Commute/leaving nudges</span><span class="switch"><input id="t-pcommute" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Weather alerts</span><span class="switch"><input id="t-pweather" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Session-start suggestions (&ldquo;where to start&rdquo;)</span><span class="switch"><input id="t-popeners" type="checkbox"><span class="track"></span></span></div>
+    </section>
+
+    <section class="card" aria-labelledby="s-privacy">
+      <h3 id="s-privacy">Privacy &amp; Processing</h3>
+      <div class="field"><label for="f-llm">Brain (LLM)</label>
+        <select id="f-llm"><option value="cloud">Cloud (OpenRouter)</option><option value="local">Local only (Ollama)</option></select></div>
+      <div class="field"><label for="f-stt">Speech-to-text</label>
+        <select id="f-stt"><option value="device">On device / browser</option><option value="cloud">Cloud</option></select></div>
+      <div class="field"><label for="f-tts">Text-to-speech</label>
+        <select id="f-tts"><option value="device">On device / browser</option><option value="cloud">Cloud (Piper/ElevenLabs via hub)</option></select></div>
+      <div class="field"><label for="f-vision">Vision processing</label>
+        <select id="f-vision"><option value="off">Off</option><option value="local">On device only</option><option value="cloud">Cloud allowed</option></select></div>
+      <div class="row"><span class="desc" style="flex:1">Location access</span><span class="switch"><input id="t-location" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Raw transcript logging (off by default)</span><span class="switch"><input id="t-transcripts" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Learn my routines &amp; preferences (local-only)</span><span class="switch"><input id="t-learning" type="checkbox"><span class="track"></span></span></div>
+      <div class="row" style="margin-top:10px"><button class="btn danger" id="b-wipe">Erase my memory</button></div>
+    </section>
+
+    <section class="card" aria-labelledby="s-mydata">
+      <h3 id="s-mydata">My Data</h3>
+      <p class="desc" style="margin-bottom:8px">Everything Jarvis holds about the selected profile, by category. Export downloads a JSON copy; delete removes it from the encrypted stores immediately (verified by the list refreshing).</p>
+      <div id="mydataList" aria-live="polite"><p class="desc">Loading…</p></div>
+      <div class="row" style="margin-top:8px"><button class="btn ghost" id="b-mydata-export" type="button">Export JSON</button><button class="btn ghost" id="b-mydata-refresh" type="button">Refresh</button></div>
+    </section>
+
+    <section class="card" aria-labelledby="s-learn">
+      <h3 id="s-learn">What Jarvis has learned about me</h3>
+      <p class="desc" style="margin-bottom:8px">Learned <b>patterns</b>, not raw stored data — inspectable, editable, resettable. Signals are metadata only (which skill, when, tone of voice), never your words. Learned routines appear as <b>suggestions</b> — nothing happens automatically until you confirm. Auth, locks and payments are permanently off-limits to this layer, and anomaly flags never block anything.</p>
+      <div id="learnList" aria-live="polite"><p class="desc">Loading…</p></div>
+      <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap">
+        <button class="btn ghost" id="b-learn-refresh" type="button">Refresh</button>
+        <button class="btn danger" id="b-learn-reset" type="button">Reset learning layer</button>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="s-local">
+      <h3 id="s-local">Local Brain (Ollama)</h3>
+      <p class="desc" style="margin-bottom:6px">Used in <b>hacking mode</b> (uncensored) and whenever Brain = Local only. One-time download, then fully offline.</p>
+      <div class="field"><label for="f-ourl">Ollama URL</label><input id="f-ourl" type="url" placeholder="http://127.0.0.1:11434"></div>
+      <div class="field"><label for="f-omodel">Model</label><input id="f-omodel" type="text" placeholder="hf.co/…:Q4_K_M"></div>
+      <div class="row"><span class="desc" style="flex:1" id="o-status" role="status" aria-live="polite">Checking…</span><button class="btn ghost" id="b-opull" type="button">Pull model</button></div>
+    </section>
+
+    <section class="card" aria-labelledby="s-users">
+      <h3 id="s-users">Household Profiles</h3>
+      <ul id="usersList"></ul>
+      <div class="row"><span class="desc" style="flex:1">Guest mode (restricted)</span><span class="switch"><input id="t-guest" type="checkbox"><span class="track"></span></span></div>
+      <p class="desc" style="margin-top:8px">Kid profiles block developer/vehicle skills; guest mode hides personal memory, calendar, notes, and locks.</p>
+    </section>
+
+    <section class="card" aria-labelledby="s-home">
+      <h3 id="s-home">Smart Home (Home Assistant)</h3>
+      <div class="field"><label for="f-haurl">HA URL</label><input id="f-haurl" type="url" placeholder="http://homeassistant.local:8123"></div>
+      <div class="field"><label for="f-hatoken">Long-lived token</label><input id="f-hatoken" type="password" autocomplete="off" placeholder="••••••"></div>
+    </section>
+
+    <section class="card" aria-labelledby="s-sos">
+      <h3 id="s-sos">Emergency Contacts</h3>
+      <div id="contactsList"></div>
+      <div class="row">
+        <input type="text" id="c-name" placeholder="Name" aria-label="Contact name" style="flex:1;font:inherit;font-size:13px;padding:8px 10px;border-radius:10px;border:1px solid var(--line)">
+        <input type="text" id="c-phone" placeholder="Phone / handle" aria-label="Contact phone" style="flex:1;font:inherit;font-size:13px;padding:8px 10px;border-radius:10px;border:1px solid var(--line)">
+        <button class="btn" id="b-addcontact">Add</button>
+      </div>
+      <p class="desc" style="margin-top:8px">SOS posts these to your webhook (Twilio/IFTTT/Zapier) configured via EMERGENCY_WEBHOOK.</p>
+    </section>
+
+    <section class="card" aria-labelledby="s-skills">
+      <h3 id="s-skills">Skills</h3>
+      <ul id="skillsList" aria-describedby="d-skills"></ul>
+      <p class="desc" id="d-skills">Skills are drop-in modules in <code>hub/skills/</code>; disabling is instant and reversible.</p>
+    </section>
+
+    <section class="card" aria-labelledby="s-look">
+      <h3 id="s-look">Appearance &amp; Access</h3>
+      <div class="row"><span class="desc" style="flex:1">High contrast</span><span class="switch"><input id="t-contrast" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Reduced motion</span><span class="switch"><input id="t-motion" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">System notifications</span><span class="switch"><input id="t-notify" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Jarvis mode — time-of-day greeting + status-aware lines (see the Systems page)</span><span class="switch"><input id="t-jarvis" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Daily briefing on first connect of the day (weather + calendar + news)</span><span class="switch"><input id="t-briefing" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Screen-reading on the Vision page (one-shot screen share; off by default)</span><span class="switch"><input id="t-screenread" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Gesture input (off by default — only ever starts from this switch; never on boot)</span><span class="switch"><input id="t-gesture" type="checkbox"><span class="track"></span></span></div>
+    </section>
+
+    <section class="card" aria-labelledby="s-integ">
+      <h3 id="s-integ">Integrations — service credentials (not LLM keys)</h3>
+      <p class="desc">These never touch the OpenRouter keyring/rotation. Tokens save masked and stay encrypted at rest.</p>
+      <div class="row"><span class="desc" style="flex:1">Discord bot token</span><input id="f-discordtok" class="desc" style="width:220px" type="password" placeholder="leave blank to keep current"></div>
+      <div class="row"><span class="desc" style="flex:1">Discord channel id</span><input id="f-discordchan" class="desc" style="width:220px" placeholder="1234567890123456789"></div>
+      <div class="row"><span class="desc" style="flex:1">Flight status key (free AviationStack tier)</span><input id="f-flightskey" class="desc" style="width:220px" type="password" placeholder="leave blank to keep current"></div>
+      <div class="row"><span class="desc" style="flex:1">GitHub token (fine-grained PAT — scopes: docs/GITHUB.md)</span><input id="f-ghtok" class="desc" style="width:220px" type="password" placeholder="leave blank to keep current"></div>
+      <div class="row"><span class="desc" style="flex:1" id="ghStatus">GitHub: checking…</span><button class="btn ghost" id="b-ghdisconnect" type="button" title="Instant: clears the token and cached GitHub data">Disconnect GitHub</button></div>
+      <div class="row"><span class="desc" style="flex:1">Jarvis Remote PIN (household lock for the terminal page)</span><input id="f-remotepin" class="desc" style="width:120px" type="password" inputmode="numeric" placeholder="blank = no PIN"></div>
+    </section>
+  </div>
+
+  <div class="row" style="margin-top:18px;justify-content:center">
+    <button class="btn primary" id="b-save">Save changes</button>
+    <span class="hint" id="saveMsg" role="status"></span>
+  </div>
+</main>
+
+<script src="js/common.js"></script>
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  let settings = null;
+
+  /* voices */
+  /* Voice picker hardening: the select must NEVER render empty.
+     - the default option is appended before anything can throw
+     - MAX.voices is read defensively (browsers/WebViews without speechSynthesis)
+     - an explanatory disabled option replaces a blank list
+     - Chrome loads the voice list asynchronously and sometimes never fires
+       voiceschanged at all — poll briefly so an empty picker self-heals */
+  function fillVoices() {
+    const sel = $('f-voice');
+    sel.innerHTML = '';
+    const def = document.createElement('option');
+    def.value = ''; def.textContent = 'Auto (Jarvis default)';
+    sel.appendChild(def);
+    let vs = [];
+    try { vs = MAX.voices; } catch { vs = []; }
+    vs.forEach((v) => { const o = document.createElement('option'); o.value = v.name; o.textContent = `${v.name} (${v.lang})`; sel.appendChild(o); });
+    if (!vs.length) {
+      const o = document.createElement('option');
+      o.disabled = true;
+      o.textContent = ('speechSynthesis' in window)
+        ? 'No device voices installed on this system/browser — spoken replies stay silent (text still works)'
+        : 'This browser has no speech synthesis — spoken replies unavailable; use text mode';
+      sel.appendChild(o);
+    }
+    sel.value = MAX.LS.get('voice', '');
+    return vs.length;
+  }
+  fillVoices();
+  if ('speechSynthesis' in window) {
+    speechSynthesis.onvoiceschanged = fillVoices;
+    let voiceTries = 0;
+    const voicePoll = setInterval(() => { if (fillVoices() > 0 || ++voiceTries >= 10) clearInterval(voicePoll); }, 400);
+  }
+  $('b-testvoice').onclick = () => MAX.speak("Hello, I'm Jarvis. How can I take care of you today?", {});
+
+  /* local prefs */
+  $('f-rate').value = MAX.LS.get('rate', 1);
+  $('f-pitch').value = MAX.LS.get('pitch', 1);
+  $('t-textonly').checked = MAX.LS.get('textOnly', false);
+  $('t-contrast').checked = MAX.LS.get('highContrast', false);
+  $('t-motion').checked = MAX.LS.get('reducedMotion', false);
+  $('t-notify').checked = MAX.LS.get('notifications', false);
+  $('f-token').value = MAX.LS.get('token', '');
+
+  $('t-contrast').onchange = () => { MAX.LS.set('highContrast', $('t-contrast').checked); MAX.applyPrefs(); document.documentElement.dataset.contrast = $('t-contrast').checked ? 'high' : ''; };
+  $('t-motion').onchange = () => { MAX.LS.set('reducedMotion', $('t-motion').checked); MAX.applyPrefs(); location.reload(); };
+  $('t-notify').onchange = () => { MAX.LS.set('notifications', $('t-notify').checked); if ($('t-notify').checked) MAX.notify('Jarvis', 'Notifications on'); };
+  $('t-jarvis').checked = MAX.LS.get('jarvis', true); // Jarvis fork: persona is the product voice, on unless disabled
+  $('t-jarvis').onchange = () => { MAX.LS.set('jarvis', $('t-jarvis').checked); if ($('t-jarvis').checked) try { sessionStorage.removeItem('jarvisGreeted'); } catch {} };
+  $('t-textonly').onchange = () => MAX.LS.set('textOnly', $('t-textonly').checked);
+  $('f-voice').onchange = () => MAX.LS.set('voice', $('f-voice').value);
+  $('f-rate').onchange = () => MAX.LS.set('rate', parseFloat($('f-rate').value));
+  $('f-pitch').onchange = () => MAX.LS.set('pitch', parseFloat($('f-pitch').value));
+  $('f-token').onchange = () => MAX.LS.set('token', $('f-token').value.trim());
+
+  /* OpenRouter keys are .env-only (v1.0.7) — this page only surfaces the model id. */
+  async function loadKeys() {
+    const d = await MAX.get('/api/keys');
+    $('k-model').value = d.model || '';
+  }
+
+  /* users */
+  async function loadUsers() {
+    const users = await MAX.get('/api/users');
+    const sel = $('f-user'); sel.innerHTML = '';
+    const ensure = users.some((u) => u.id === 'default') ? users : [{ id: 'default', name: 'Owner' }, ...users];
+    ensure.forEach((u) => {
+      const o = document.createElement('option'); o.value = u.id; o.textContent = `${u.name} (${u.id})${u.kid ? ' · kid' : ''}${u.guest ? ' · guest' : ''}`;
+      sel.appendChild(o);
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${u.name}${u.hasVoiceprint ? ' 🎙' : ''}</span>
+        <span class="row">
+          <label class="desc">kid <input type="checkbox" data-flag="kid" data-id="${u.id}" ${u.kid ? 'checked' : ''}></label>
+          <label class="desc">guest <input type="checkbox" data-flag="guest" data-id="${u.id}" ${u.guest ? 'checked' : ''}></label>
+        </span>`;
+      li.style.display = 'flex'; li.style.justifyContent = 'space-between'; li.style.alignItems = 'center';
+      $('usersList').appendChild(li);
+    });
+    sel.value = MAX.user();
+    sel.onchange = () => MAX.LS.set('user', sel.value);
+    document.querySelectorAll('input[data-flag]').forEach((cb) => {
+      cb.onchange = () => MAX.post('/api/users', { id: cb.dataset.id, flags: { [cb.dataset.flag]: cb.checked } });
+    });
+  }
+
+  /* skills */
+  async function loadSkills() {
+    const skills = await MAX.get('/api/skills');
+    $('skillsList').innerHTML = '';
+    skills.forEach((s) => {
+      const li = document.createElement('li');
+      li.style.display = 'flex'; li.style.justifyContent = 'space-between'; li.style.alignItems = 'center';
+      li.innerHTML = `<span>${s.label}${s.sensitive ? ' 🔒' : ''} <span class="desc">v${s.version}</span></span>`;
+      const sw = document.createElement('span');
+      sw.className = 'switch';
+      sw.innerHTML = `<input type="checkbox" ${s.enabled ? 'checked' : ''} aria-label="Enable ${s.label}"><span class="track"></span>`;
+      sw.querySelector('input').onchange = (e) => MAX.post('/api/settings', { skills: { [s.name]: e.target.checked } });
+      li.appendChild(sw);
+      $('skillsList').appendChild(li);
+    });
+  }
+
+  /* contacts */
+  function renderContacts(list) {
+    $('contactsList').innerHTML = '';
+    list.forEach((c, i) => {
+      const li = document.createElement('div');
+      li.className = 'row'; li.style.margin = '6px 0';
+      li.innerHTML = `<span style="flex:1" class="desc"><b>${c.name}</b> — ${c.phone}</span>`;
+      const del = document.createElement('button'); del.className = 'btn ghost'; del.textContent = '✕';
+      del.onclick = () => { list.splice(i, 1); MAX.post('/api/settings', { emergencyContacts: list }); renderContacts(list); };
+      li.appendChild(del);
+      $('contactsList').appendChild(li);
+    });
+  }
+  $('b-addcontact').onclick = () => {
+    const name = $('c-name').value.trim(), phone = $('c-phone').value.trim();
+    if (!name || !phone) return;
+    settings.emergencyContacts = settings.emergencyContacts || [];
+    settings.emergencyContacts.push({ name, phone });
+    $('c-name').value = $('c-phone').value = '';
+    MAX.post('/api/settings', { emergencyContacts: settings.emergencyContacts });
+    renderContacts(settings.emergencyContacts);
+  };
+
+  /* voiceprint enrollment (experimental) */
+  $('b-delvoice').onclick = async () => {
+    if (!confirm('Forget the enrolled voiceprint for the current user?')) return;
+    await MAX.post('/api/voiceprint/delete', { user: MAX.user() });
+    $('enrollStatus').textContent = 'Voiceprint forgotten.';
+  };
+  $('b-enroll').onclick = async () => {
+    $('enrollStatus').textContent = 'Say “Jarvis, it’s me” a few times… capturing 3 samples.';
+    try {
+      const samples = [];
+      for (let i = 0; i < 3; i++) { samples.push(await captureOnce()); }
+      const avg = samples[0].map((_, i) => samples.reduce((s, x) => s + x[i], 0) / samples.length);
+      await MAX.post('/api/voiceprint/enroll', { user: MAX.user(), features: avg });
+      $('enrollStatus').textContent = 'Enrolled. Sensitive actions now ask for your voice. (Best-effort, not foolproof.)';
+    } catch { $('enrollStatus').textContent = 'Mic unavailable — enrollment failed.'; }
+  };
+  async function captureOnce() {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const an = ac.createAnalyser(); an.fftSize = 2048;
+    ac.createMediaStreamSource(stream).connect(an);
+    const time = new Uint8Array(an.fftSize), freq = new Uint8Array(an.frequencyBinCount);
+    const t0 = performance.now(); const out = [];
+    while (performance.now() - t0 < 1600) {
+      await new Promise((r) => setTimeout(r, 100));
+      an.getByteTimeDomainData(time); an.getByteFrequencyData(freq);
+      let rms = 0, cr = 0, num = 0, den = 0, low = 0, high = 0;
+      for (let i = 0; i < time.length; i++) { const v = (time[i] - 128) / 128; rms += v * v; if (i && (time[i - 1] < 128) !== (time[i] < 128)) cr++; }
+      for (let i = 0; i < freq.length; i++) { num += i * freq[i]; den += freq[i]; if (i < freq.length * 0.125) low += freq[i]; else if (i > freq.length * 0.5) high += freq[i]; }
+      out.push([Math.sqrt(rms / time.length), (cr / time.length) * 10, den ? num / den / freq.length : 0, den ? low / den : 0, den ? high / den : 0]);
+    }
+    ac.close(); stream.getTracks().forEach((t) => t.stop());
+    return [0, 1, 2, 3, 4].map((i) => Math.round((out.reduce((s, x) => s + x[i], 0) / out.length) * 1000) / 1000);
+  }
+
+  /* wipe memory */
+  $('b-wipe').onclick = async () => {
+    if (!confirm('Erase ALL personal data — memory, voiceprints, notes, expenses, calendar, timers? This cannot be undone.')) return;
+    await MAX.post('/api/data/wipe', {});
+    $('saveMsg').textContent = 'All personal data erased.';
+  };
+
+  /* ----- GitHub integration status + one-tap revocation ----- */
+  async function ghStatus() {
+    try {
+      const st = await MAX.get('/api/github/status');
+      $('ghStatus').textContent = st.connected
+        ? 'GitHub: connected' + (st.user ? ' as ' + st.user : '') + ' · api ' + st.rate.lastMinute + '/min (cap ' + st.rate.capPerMin + ')' + (st.lastError ? ' · last error: ' + st.lastError : '')
+        : 'GitHub: not connected';
+    } catch { $('ghStatus').textContent = 'GitHub: status unavailable'; }
+  }
+  $('b-ghdisconnect').onclick = async () => {
+    if (!confirm('Disconnect GitHub now? The token is removed and cached GitHub data wiped — all GitHub capabilities stop immediately.')) return;
+    await MAX.post('/api/github/disconnect', {});
+    ghStatus();
+  };
+  ghStatus();
+
+  /* ----- What Jarvis has learned ----- */
+  const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function learnBadge(state) {
+    const col = state === 'confirmed' ? '#2e7d32' : state === 'pending' ? '#e65100' : state === 'dismissed' ? '#777' : '#b71c1c';
+    return ' <b style="color:' + col + '">· ' + esc(state) + '</b>';
+  }
+  async function renderLearn() {
+    const box = $('learnList'); if (!box) return;
+    let L;
+    try { L = await MAX.get('/api/learn?user=' + encodeURIComponent(MAX.user())); } catch (e) { box.innerHTML = '<p class="desc">Could not load: ' + esc(e.message) + '</p>'; return; }
+    const h = [];
+    if (!L.enabled) h.push('<p class="desc"><b>Learning is off</b> (Privacy → Learn my routines &amp; preferences). Existing learned items below stay stored until you reset.</p>');
+    h.push('<p class="desc">Signals held: ' + L.signals.count + ' / ' + L.signals.cap + ' · retention ' + L.signals.retentionDays + ' days · total seen ' + L.signals.total + '</p>');
+    // routine suggestions
+    h.push('<h4 style="margin:10px 0 4px">Routine suggestions</h4>');
+    if (!L.routines.length) h.push('<p class="desc">No routines detected yet — patterns surface after several repeats across different weeks.</p>');
+    for (const r of L.routines) {
+      h.push('<div class="row" style="gap:6px;flex-wrap:wrap"><span class="desc" style="flex:1;min-width:180px">You usually use <b>' + esc(r.skill) + '</b> around ' + DAYS[r.dow] + ' ' + String(r.hour).padStart(2,'0') + ':00 — ' + r.n + '× · confidence ' + Math.round(r.confidence*100) + '%' + learnBadge(r.state) + '</span>'
+        + '<button class="btn ghost" data-learn="confirm" data-id="' + esc(r.id) + '">Confirm</button>'
+        + '<button class="btn ghost" data-learn="dismiss" data-id="' + esc(r.id) + '">Dismiss</button>'
+        + '<button class="btn ghost" data-learn="stop" data-id="' + esc(r.id) + '">Stop learning this</button></div>');
+    }
+    // in-progress patterns — accumulation is visible BEFORE the guardrails pass
+    const em = L.emerging || [];
+    h.push('<h4 style="margin:10px 0 4px">Still learning (live progress)</h4>');
+    if (!em.length) h.push('<p class="desc">Repeat something in a similar way a few times and it shows up here as it accumulates — it becomes a suggestion above at ≥' + L.guardrails.routineMinHits + ' repeats across ≥' + L.guardrails.routineMinWeeks + ' weeks.</p>');
+    for (const e of em) h.push('<div class="row" style="gap:6px"><span class="desc" style="flex:1"><b>' + esc(e.skill) + '</b> around ' + DAYS[e.dow] + ' ' + String(e.hour).padStart(2,'0') + ':00 — <b>' + e.n + '/' + e.needed.hits + '</b> repeats · <b>' + e.weeks + '/' + e.needed.weeks + '</b> weeks</span></div>');
+    // preference embedding (inspectable topic→weight)
+    h.push('<h4 style="margin:10px 0 4px">Preference profile (topic → weight)</h4>');
+    const me = MAX.user(), pref = (L.prefs && L.prefs[me] && L.prefs[me].topics) || {};
+    const keys = Object.keys(pref);
+    if (!keys.length) h.push('<p class="desc">Nothing learned yet.</p>');
+    else h.push('<div class="row" style="gap:6px;flex-wrap:wrap">' + keys.map((k) => '<span class="row" style="gap:4px;border:1px solid var(--line);border-radius:8px;padding:2px 8px"><span class="desc"><b>' + esc(k) + '</b> ' + pref[k] + '</span><button class="btn ghost" style="padding:0 6px" title="Forget this" data-forget="pref" data-key="' + esc(k) + '">×</button></span>').join('') + '</div>');
+    // adaptive tone
+    h.push('<h4 style="margin:10px 0 4px">Adaptive tone</h4>');
+    const t = L.tone && L.tone[me];
+    h.push('<p class="desc">' + (t ? 'Signals: ' + t.signals + ' · drift nudge applied to your tone slider: <b>' + (t.drift > 0 ? '+' : '') + t.drift + '</b> (hard-capped at ±' + (L.guardrails.toneDriftCap) + ')' : 'No tone adaptation yet (needs 20+ signals).') + '</p>');
+    // corrections
+    h.push('<h4 style="margin:10px 0 4px">Corrections you taught me</h4>');
+    const corr = (L.corrections && L.corrections[me]) || [];
+    if (!corr.length) h.push('<p class="desc">No corrections learned. When you say “no, I meant the bedroom light” a couple of times, I start using that.</p>');
+    for (const c of corr) h.push('<div class="row" style="gap:6px"><span class="desc" style="flex:1"><b>' + esc(c.skill) + '</b>: “' + esc(c.from) + '” → “' + esc(c.to) + '” · ' + c.n + '×' + (c.n >= L.guardrails.rerankMinCorrections ? ' · <b style="color:#2e7d32">active</b>' : ' · learning…') + '</span><button class="btn ghost" data-forget="correction" data-key="' + esc(c.from + '→' + c.to) + '">Forget</button></div>');
+    // anomalies (review flags — never blocks)
+    h.push('<h4 style="margin:10px 0 4px">Anomaly flags (review only — never blocks)</h4>');
+    const an = (L.anomalies && L.anomalies[me]) || [];
+    if (!an.length) h.push('<p class="desc">No unusual-activity flags.</p>');
+    for (const f of an.slice(-5)) h.push('<div class="row" style="gap:6px"><span class="desc" style="flex:1">' + new Date(f.ts).toLocaleString() + ' — activity burst at ~' + String(f.hour).padStart(2,'0') + ':00 (z=' + f.z + ')</span><button class="btn ghost" data-forget="anomaly" data-key="' + f.ts + '">Clear</button></div>');
+    // model registry
+    h.push('<h4 style="margin:10px 0 4px">Model versions</h4>');
+    for (const name of Object.keys(L.models)) {
+      const m = L.models[name];
+      h.push('<div class="row" style="gap:6px"><span class="desc" style="flex:1"><b>' + esc(name) + '</b> — v' + m.current + (m.versions.length > 1 ? ' (' + m.versions.length + ' versions kept)' : '') + '</span>' + (m.versions.length > 1 ? '<button class="btn ghost" data-rollback="' + esc(name) + '">Roll back</button>' : '') + '</div>');
+    }
+    h.push('<p class="desc" style="margin-top:6px">Guardrails: routines need ≥' + L.guardrails.routineMinHits + ' repeats across ≥' + L.guardrails.routineMinWeeks + ' weeks and ≥' + L.guardrails.routineBaselineMult + '× your baseline · tone drift capped ±' + L.guardrails.toneDriftCap + ' · re-ranking needs ' + L.guardrails.rerankMinCorrections + ' corrections · anomaly flags need ' + L.guardrails.anomalyMinSignals + '+ signals over ' + L.guardrails.anomalyMinDays + '+ days. ' + esc(L.guardrails.offLimits) + '</p>');
+    box.innerHTML = h.join('');
+  }
+  $('learnList').addEventListener('click', async (ev) => {
+    const el = ev.target.closest('button'); if (!el) return;
+    if (el.dataset.learn) { await MAX.post('/api/learn/feedback', { id: el.dataset.id, action: el.dataset.learn }); renderLearn(); }
+    else if (el.dataset.forget) { await MAX.post('/api/learn/forget', { kind: el.dataset.forget, key: el.dataset.key, user: MAX.user() }); renderLearn(); }
+    else if (el.dataset.rollback) { if (confirm('Roll the "' + el.dataset.rollback + '" model back one version?')) { await MAX.post('/api/learn/rollback', { model: el.dataset.rollback }); renderLearn(); } }
+  });
+  $('b-learn-refresh').onclick = renderLearn;
+  $('b-learn-reset').onclick = async () => {
+    if (!confirm('Reset ONLY the learning layer (signals, routines, preferences, tone drift, corrections, anomaly stats, model versions)? Facts, notes, settings and memories are kept.')) return;
+    await MAX.post('/api/learn/reset', {});
+    $('saveMsg').textContent = 'Learning layer reset.'; setTimeout(() => ($('saveMsg').textContent = ''), 2500);
+    renderLearn();
+  };
+  renderLearn();
+
+  /* load + save */
+  async function load() {
+    try {
+      settings = await MAX.get('/api/settings');
+      $('f-name').value = settings.assistantName || 'Jarvis';
+      $('f-city').value = settings.homeCity || '';
+      $('f-tz').value = settings.timezone || 'Asia/Kolkata';
+      $('f-llm').value = settings.privacy.llm;
+      $('f-stt').value = settings.privacy.stt;
+      $('f-tts').value = settings.privacy.tts;
+      $('f-vision').value = settings.privacy.vision;
+      $('t-location').checked = !!settings.privacy.location;
+      $('t-transcripts').checked = !!settings.privacy.transcriptLogging;
+      $('t-learning').checked = settings.privacy.learning !== false;
+      $('f-tone').value = settings.personality.tone ?? 0.5;
+      $('t-proactive').checked = settings.proactive?.enabled !== false;
+      $('t-pcommute').checked = settings.proactive?.categories?.commute !== false;
+      $('t-pweather').checked = settings.proactive?.categories?.weather !== false;
+      $('t-popeners').checked = settings.proactive?.openers !== false;
+      $('t-guest').checked = !!settings.guestMode;
+      $('f-haurl').value = settings.homeAssistant.url || '';
+      const ig = settings.integrations || {}, ft = settings.features || {};
+      $('f-discordchan').value = ig.discordChannel || '';
+      $('t-briefing').checked = !!ft.startupBriefing;
+      $('t-screenread').checked = !!ft.screenRead;
+      $('t-gesture').checked = !!ft.gestureControl;
+      $('f-ourl').value = (settings.security && settings.security.url) || 'http://127.0.0.1:11434';
+      $('f-omodel').value = (settings.security && settings.security.model) || '';
+      renderContacts(settings.emergencyContacts || []);
+      await Promise.all([loadUsers(), loadSkills(), loadKeys(), loadMyData()]);
+    } catch (e) { $('saveMsg').textContent = 'Hub unreachable: ' + e.message; }
+  }
+
+  /* my data — view/export/delete per category */
+  const MYDATA_LABELS = { profile: 'Profile', facts: 'Remembered facts', preferences: 'Preferences', voiceprint: 'Voiceprint', sessions: 'Live session', notes: 'Notes', finance: 'Finance ledger', calendar: 'Calendar events', vehicle: 'Vehicle (demo) data', schedule: 'Timers & reminders', stats: 'Usage stats' };
+  async function loadMyData() {
+    const box = $('mydataList');
+    try {
+      const v = await MAX.get('/api/mydata?user=' + encodeURIComponent(MAX.user()));
+      box.innerHTML = '';
+      const describe = (k) => {
+        const d = v[k];
+        if (d == null) return '';
+        if (k === 'profile') return d.exists ? 'exists' : '—';
+        if (k === 'voiceprint') return d.enrolled ? 'enrolled' : '—';
+        if (k === 'sessions') return d.live ? `${d.turns} turns${d.pendingTask ? ' · pending task' : ''}` : '—';
+        if (k === 'preferences' || k === 'stats') return Object.keys(d.counts || d).length + ' keys';
+        return (d.count || 0) + ' items';
+      };
+      Object.keys(MYDATA_LABELS).forEach((k) => {
+        const row = document.createElement('div');
+        row.className = 'row'; row.style.justifyContent = 'space-between';
+        const del = (k === 'profile') ? '' : ` <button class="btn ghost" style="padding:2px 8px;font-size:12px" data-cat="${k}" type="button">delete</button>`;
+        row.innerHTML = `<span class="desc">${MYDATA_LABELS[k]}</span><span class="desc"><b>${describe(k)}</b>${del}</span>`;
+        box.appendChild(row);
+      });
+      box.querySelectorAll('button[data-cat]').forEach((b) => {
+        b.onclick = async () => {
+          if (!confirm(`Really delete "${MYDATA_LABELS[b.dataset.cat]}" for ${MAX.user()}? This is immediate and permanent.`)) return;
+          await MAX.post('/api/mydata/delete', { user: MAX.user(), category: b.dataset.cat });
+          loadMyData();
+        };
+      });
+    } catch (e) { box.innerHTML = '<p class="desc">Could not load: ' + e.message + '</p>'; }
+  }
+  $('b-mydata-export').onclick = () => { window.location = '/api/mydata/export?user=' + encodeURIComponent(MAX.user()); };
+  $('b-mydata-refresh').onclick = () => loadMyData();
+
+  $('b-save').onclick = async () => {
+    const patch = {
+      assistantName: $('f-name').value.trim() || 'Jarvis',
+      homeCity: $('f-city').value.trim(),
+      timezone: $('f-tz').value.trim() || 'Asia/Kolkata',
+      privacy: { llm: $('f-llm').value, stt: $('f-stt').value, tts: $('f-tts').value, vision: $('f-vision').value, location: $('t-location').checked, transcriptLogging: $('t-transcripts').checked, learning: $('t-learning').checked },
+      personality: { tone: parseFloat($('f-tone').value) },
+      proactive: { enabled: $('t-proactive').checked, categories: { commute: $('t-pcommute').checked, weather: $('t-pweather').checked, routines: true }, openers: $('t-popeners').checked },
+      guestMode: $('t-guest').checked,
+      openrouter: { model: $('k-model').value.trim() },
+      security: { url: $('f-ourl').value.trim() || 'http://127.0.0.1:11434', model: $('f-omodel').value.trim() },
+      homeAssistant: { url: $('f-haurl').value.trim() },
+      features: { startupBriefing: $('t-briefing').checked, screenRead: $('t-screenread').checked, gestureControl: $('t-gesture').checked },
+      integrations: { discordChannel: $('f-discordchan').value.trim() },
+    };
+    if ($('f-hatoken').value.trim()) patch.homeAssistant.token = $('f-hatoken').value.trim();
+    if ($('f-discordtok').value.trim() && !$('f-discordtok').value.includes('•')) patch.integrations.discordToken = $('f-discordtok').value.trim();
+    if ($('f-flightskey').value.trim() && !$('f-flightskey').value.includes('•')) patch.integrations.flightsKey = $('f-flightskey').value.trim();
+    if ($('f-ghtok').value.trim() && !$('f-ghtok').value.includes('•')) patch.integrations.ghToken = $('f-ghtok').value.trim();
+    if ($('f-remotepin').value.trim() && !$('f-remotepin').value.includes('•')) patch.features.remotePass = $('f-remotepin').value.trim();
+    MAX.LS.set('screenShare', $('t-screenread').checked);
+    try { await MAX.post('/api/settings', patch); $('saveMsg').textContent = 'Saved.'; setTimeout(() => ($('saveMsg').textContent = ''), 2500); }
+    catch (e) { $('saveMsg').textContent = 'Save failed: ' + e.message; }
+  };
+
+  /* ----- Local brain (Ollama) status + pull ----- */
+  let oPoll = null;
+  function fmtOllama(st) {
+    if (!st || st.state === 'down') return 'Ollama offline — install from ollama.com and run `ollama serve`.';
+    if (st.state === 'ready') return 'Model ready — ' + st.model;
+    if (st.state === 'pulling') return 'Pulling ' + st.model.split('/').pop() + '… ' + (st.pct == null ? (st.status || 'starting') : st.pct + '%');
+    if (st.state === 'starting') return 'Starting pull of ' + st.model + '…';
+    if (st.state === 'missing') return 'Ollama is up, model not pulled yet — press Pull model (one-time ~5–6 GB).';
+    if (st.state === 'error') return 'Last pull failed: ' + st.error;
+    return st.state || 'unknown';
+  }
+  async function ollamaStatus() {
+    try { $('o-status').textContent = fmtOllama(await MAX.get('/api/ollama/status')); }
+    catch { $('o-status').textContent = 'Hub unreachable.'; }
+  }
+  $('b-opull').onclick = async () => {
+    await MAX.post('/api/settings', { security: { url: $('f-ourl').value.trim(), model: $('f-omodel').value.trim() } }).catch(() => {});
+    $('o-status').textContent = 'Starting pull…';
+    const st = await MAX.post('/api/ollama/pull', {}).catch(() => null);
+    $('o-status').textContent = fmtOllama(st);
+    if (oPoll) clearInterval(oPoll);
+    oPoll = setInterval(async () => {
+      const s = await MAX.get('/api/ollama/status').catch(() => null);
+      $('o-status').textContent = fmtOllama(s);
+      if (!s || !(s.state === 'pulling' || s.state === 'starting')) { clearInterval(oPoll); oPoll = null; }
+    }, 3000);
+  };
+  ollamaStatus();
+
+  load();
+})();
+</script>
+</body>
+</html>
