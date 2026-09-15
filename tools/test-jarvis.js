@@ -13,8 +13,8 @@
      J10 package.json identity (jarvis-ai, versioned independently)
      J11 provenance/history honesty: CHANGELOG top entry is the fork; pre-fork history kept
      J12 fork source tree is a full independent copy (same module set as upstream spec)
-     J13 v1.0.7: NO OpenRouter key UI anywhere in web (settings/dashboard); writes 410
-     J14 keyring reads .env OPENROUTER_KEY_n ONLY — legacy aliases + settings ignored
+     J13 v1.0.10: provider key UI exists for OpenRouter/Groq/Gemini with live model discovery (add-key/save/fetch)
+     J14 keyring reads .env OPENROUTER_KEY_n ONLY for loadKeys, but effectiveKeys merges .env + settings (new multi-provider policy)
      J15 keymigrate folds settings+alias keys into .env once, purges store, idempotent
      J16 boot preflight refuses partial rotations, naming the missing slot; override boots
 */
@@ -133,28 +133,36 @@ const read = (rel) => {
 }
 
 (async () => {
-/* J13: no OpenRouter key UI remains in any web page; server write path is 410 Gone */
+/* J13: provider key UI exists for OpenRouter, Groq, Gemini with model discovery */
 {
   const s = read('web/settings.html');
   const d = read('web/dashboard.html');
   const srv = read('hub/server.js');
-  ok('J13: settings/dashboard contain zero key inputs or key-management calls (keys are .env-only, never displayed)',
-    !/id="k-new"|b-addkey|keysList|MAX\.post\('\/api\/keys'|MAX\.api\('\/api\/keys/.test(s)
-      && /OPENROUTER_KEY_1/.test(s) // static explanatory note pointing at .env
-      && !/openrouter.*key|api\/keys/i.test(d)
-      && !/o\.keys\.push|o\.keys\.splice/.test(srv)
-      && /410/.test(srv) && /managed exclusively in \.env/.test(srv));
+  ok('J13: settings contains provider key management UI (openrouter/groq/gemini add-key/save/fetch + model select)',
+    /data-action="add-key".*openrouter/.test(s) && /data-action="add-key".*groq/.test(s) && /data-action="add-key".*gemini/.test(s)
+      && /data-action="save".*openrouter/.test(s) && /data-action="save".*groq/.test(s) && /data-action="save".*gemini/.test(s)
+      && /data-action="fetch".*openrouter/.test(s) && /data-action="fetch".*groq/.test(s) && /data-action="fetch".*gemini/.test(s)
+      && /or-keys/.test(s) && /groq-keys/.test(s) && /gemini-keys/.test(s)
+      && /api\/providers/.test(srv) && /fetchModels/.test(s)
+      && !/id="k-new"|b-addkey|keysList/.test(s) // old UI gone
+      && !/openrouter.*key|api\/keys/i.test(d) // dashboard still clean
+  );
 }
 
-/* J14: keyring is canonical-only */
+/* J14: keyring canonical env + settings merge (new multi-provider policy) */
 {
-  const { loadKeys, effectiveKeys, missingSlots } = require('../hub/keyring.js');
-  const env = { OPENROUTER_KEY_1: 'k1', OPENROUTER_KEY_2: 'k2', OPENROUTER_KEY_3: 'k3', OPENROUTER_KEY_4: 'k4', OPENROUTER_API_KEYS: 'csv1,csv2', OPENROUTER_API_KEY: 'single' };
+  const { loadKeys, effectiveKeys, effectiveGroqKeys, effectiveGeminiKeys, missingSlots } = require('../hub/keyring.js');
+  const env = { OPENROUTER_KEY_1: 'k1', OPENROUTER_KEY_2: 'k2', OPENROUTER_KEY_3: 'k3', OPENROUTER_KEY_4: 'k4', OPENROUTER_API_KEYS: 'csv1,csv2', OPENROUTER_API_KEY: 'single', GROQ_API_KEY_1: 'g1', GEMINI_API_KEY_1: 'gm1' };
   const got = loadKeys(env);
   ok('J14: loadKeys reads ONLY OPENROUTER_KEY_n slots (legacy CSV/single aliases ignored entirely)',
     JSON.stringify(got) === JSON.stringify(['k1', 'k2', 'k3', 'k4']) && JSON.stringify(missingSlots({ OPENROUTER_KEY_1: 'x' })) === JSON.stringify(['OPENROUTER_KEY_2', 'OPENROUTER_KEY_3']));
-  ok('J14: effectiveKeys ignores settings-store keys (one source of truth: .env)',
-    JSON.stringify(effectiveKeys({ openrouter: { keys: ['ui-key-1', 'ui-key-2'] } }, env)) === JSON.stringify(got));
+  const mergedOR = effectiveKeys({ openrouter: { keys: ['ui-key-1', 'ui-key-2'] } }, env);
+  const mergedGroq = effectiveGroqKeys({ groq: { keys: ['g-ui'] } }, env);
+  const mergedGemini = effectiveGeminiKeys({ gemini: { keys: ['gm-ui'] } }, env);
+  ok('J14: effectiveKeys merges .env + settings store (env primary, settings supplemental) for all providers',
+    JSON.stringify(mergedOR) === JSON.stringify(['k1', 'k2', 'k3', 'k4', 'ui-key-1', 'ui-key-2'])
+      && JSON.stringify(mergedGroq) === JSON.stringify(['g1', 'g-ui'])
+      && JSON.stringify(mergedGemini) === JSON.stringify(['gm1', 'gm-ui']));
 }
 
 /* J15: one-time migration folds seeds into .env, purges settings, idempotent */

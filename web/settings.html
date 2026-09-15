@@ -65,9 +65,9 @@
           <p class="desc">Primary brain. Host = <code>openai/gpt-oss-120b</code>, Sub-agents = <code>qwen/qwen3-27b</code> pool. Keys rotate with cooldown. Also supports Gemini models via OpenRouter.</p>
           <div id="or-keys"></div>
           <div class="row" style="gap:6px; margin-top:8px;">
-            <button type="button" class="btn ghost" data-action="add-key" data-provider="openrouter">+ Add key slot</button>
-            <button type="button" class="btn" data-action="save" data-provider="openrouter">Save OpenRouter keys</button>
-            <button type="button" class="btn ghost" data-action="fetch" data-provider="openrouter">Fetch models</button>
+            <button type="button" class="btn ghost" data-action="add-key" data-provider="openrouter" onclick="window.addKeySlot && window.addKeySlot('openrouter')">+ Add key slot</button>
+            <button type="button" class="btn" data-action="save" data-provider="openrouter" onclick="window.saveProvider && window.saveProvider('openrouter')">Save OpenRouter keys</button>
+            <button type="button" class="btn ghost" data-action="fetch" data-provider="openrouter" onclick="window.fetchModels && window.fetchModels('openrouter')">Fetch models</button>
           </div>
           <div class="field" style="margin-top:10px"><label>Selected model</label><input id="or-model" type="text" placeholder="openai/gpt-oss-120b"><span class="desc">Pick from list below or type custom. Saved to settings.</span></div>
           <div id="or-models" class="model-list" style="display:none"></div>
@@ -80,9 +80,9 @@
           <p class="desc">Ultra-fast inference + Orpheus TTS. Model <code>canopylabs/orpheus-3b-0.1-ft</code> for TTS, Llama/Qwen for LLM. Voice: tara, leah, jess, leo, dan, mia, zac, zoe.</p>
           <div id="groq-keys"></div>
           <div class="row" style="gap:6px; margin-top:8px;">
-            <button type="button" class="btn ghost" data-action="add-key" data-provider="groq">+ Add key slot</button>
-            <button type="button" class="btn" data-action="save" data-provider="groq">Save Groq keys</button>
-            <button type="button" class="btn ghost" data-action="fetch" data-provider="groq">Fetch models</button>
+            <button type="button" class="btn ghost" data-action="add-key" data-provider="groq" onclick="window.addKeySlot && window.addKeySlot('groq')">+ Add key slot</button>
+            <button type="button" class="btn" data-action="save" data-provider="groq" onclick="window.saveProvider && window.saveProvider('groq')">Save Groq keys</button>
+            <button type="button" class="btn ghost" data-action="fetch" data-provider="groq" onclick="window.fetchModels && window.fetchModels('groq')">Fetch models</button>
           </div>
           <div class="row" style="gap:8px; margin-top:10px;">
             <div class="field" style="flex:1"><label>Selected LLM model</label><input id="groq-model" type="text" placeholder="llama-3.3-70b-versatile"><span class="desc">Groq LLM (optional)</span></div>
@@ -98,9 +98,9 @@
           <p class="desc">Safety net when Host/Sub-agents down. Uses Google AI Studio keys (generativelanguage.googleapis.com) or OpenRouter Gemini models. 3-key overflow.</p>
           <div id="gemini-keys"></div>
           <div class="row" style="gap:6px; margin-top:8px;">
-            <button type="button" class="btn ghost" data-action="add-key" data-provider="gemini">+ Add key slot</button>
-            <button type="button" class="btn" data-action="save" data-provider="gemini">Save Gemini keys</button>
-            <button type="button" class="btn ghost" data-action="fetch" data-provider="gemini">Fetch models</button>
+            <button type="button" class="btn ghost" data-action="add-key" data-provider="gemini" onclick="window.addKeySlot && window.addKeySlot('gemini')">+ Add key slot</button>
+            <button type="button" class="btn" data-action="save" data-provider="gemini" onclick="window.saveProvider && window.saveProvider('gemini')">Save Gemini keys</button>
+            <button type="button" class="btn ghost" data-action="fetch" data-provider="gemini" onclick="window.fetchModels && window.fetchModels('gemini')">Fetch models</button>
           </div>
           <div class="field" style="margin-top:10px"><label>Selected model</label><input id="gemini-model" type="text" placeholder="google/gemini-2.0-flash-001"><span class="desc">Gemini model id (Google or OpenRouter format)</span></div>
           <div id="gemini-models" class="model-list" style="display:none"></div>
@@ -213,7 +213,7 @@
       <div class="row"><span class="desc" style="flex:1">High contrast</span><span class="switch"><input id="t-contrast" type="checkbox"><span class="track"></span></span></div>
       <div class="row"><span class="desc" style="flex:1">Reduced motion</span><span class="switch"><input id="t-motion" type="checkbox"><span class="track"></span></span></div>
       <div class="row"><span class="desc" style="flex:1">System notifications</span><span class="switch"><input id="t-notify" type="checkbox"><span class="track"></span></span></div>
-      <div class="row"><span class="desc" style="flex:1\">Jarvis mode — time-of-day greeting + status-aware lines</span><span class="switch"><input id="t-jarvis" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Jarvis mode — time-of-day greeting + status-aware lines</span><span class="switch"><input id="t-jarvis" type="checkbox"><span class="track"></span></span></div>
       <div class="row"><span class="desc" style="flex:1">Daily briefing on first connect of the day</span><span class="switch"><input id="t-briefing" type="checkbox"><span class="track"></span></span></div>
       <div class="row"><span class="desc" style="flex:1">Screen-reading on the Vision page (one-shot screen share; off by default)</span><span class="switch"><input id="t-screenread" type="checkbox"><span class="track"></span></span></div>
       <div class="row"><span class="desc" style="flex:1">Gesture input (off by default)</span><span class="switch"><input id="t-gesture" type="checkbox"><span class="track"></span></span></div>
@@ -460,7 +460,7 @@
   function addKeySlot(provider) {
     const cid = provider === 'openrouter' ? 'or-keys' : provider === 'groq' ? 'groq-keys' : 'gemini-keys';
     const cont = $(cid);
-    if (!cont) { console.warn('addKeySlot: container not found', cid); return; }
+    if (!cont) { console.warn('addKeySlot: container not found', cid); alert('Container not found: '+cid); return; }
     const idx = cont.querySelectorAll('input').length;
     const row = document.createElement('div');
     row.className = 'key-row';
@@ -482,11 +482,15 @@
     toggle.onclick = () => { inp.type = inp.type === 'password' ? 'text' : 'password'; };
     row.append(label, inp, toggle);
     cont.appendChild(row);
-    inp.focus();
+    try { inp.focus(); } catch {}
     const msgId = provider === 'openrouter' ? 'or-msg' : provider === 'groq' ? 'groq-msg' : 'gemini-msg';
     const msgEl = $(msgId);
     if (msgEl) { msgEl.textContent = `Added slot ${idx+1} — type key then Save.`; setTimeout(() => { if (msgEl.textContent.includes('Added slot')) msgEl.textContent = ''; }, 3000); }
+    console.log('addKeySlot added', provider, idx+1);
   }
+  window.addKeySlot = addKeySlot;
+  window.fetchModels = fetchModels;
+  window.saveProvider = saveProvider;
 
   // Delegated handler for save/fetch/add
   document.addEventListener('click', (ev) => {
@@ -495,6 +499,7 @@
     ev.preventDefault();
     const act = btn.dataset.action;
     const prov = btn.dataset.provider;
+    console.log('delegated click', act, prov);
     if (act === 'fetch') fetchModels(prov);
     else if (act === 'save') saveProvider(prov);
     else if (act === 'add-key') addKeySlot(prov);
@@ -505,7 +510,7 @@
     document.querySelectorAll('button[data-action=\"add-key\"]').forEach((b) => {
       if (b._boundAdd) return;
       b._boundAdd = true;
-      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); addKeySlot(b.dataset.provider); });
+      b.addEventListener('click', (e) => { console.log('direct add-key click', b.dataset.provider); e.preventDefault(); e.stopPropagation(); addKeySlot(b.dataset.provider); });
     });
   }
   // Bind after providers load and on interval for dynamic UI
