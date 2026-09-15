@@ -45,10 +45,18 @@ const DEFAULTS = {
     screenRead: false,      // off by default — one-shot screen share on the Vision page
     gestureControl: false,  // off by default — NEVER auto-starts (regression-tested)
     remotePass: '',         // household PIN for the Jarvis Remote page (real auth remains MAX_TOKEN)
+    seriousConfirm: false,  // when on, every write tool needs explicit owner confirmation — serious commitment mode
   },
   skills: {},                         // { skillName: false } => disabled
   update: { allow: process.env.ALLOW_SELF_UPDATE === '1', channel: 'stable' },
-  openrouter: { keys: [], model: '' },  // UI-managed keys take precedence over .env
+  openrouter: { keys: [], model: '', models: [] },  // UI-managed keys take precedence over .env — 3 slots (user asked 2, we keep 3 for rotation)
+  groq: { keys: [], model: 'canopylabs/orpheus-3b-0.1-ft', voice: 'tara', models: [] }, // 5 slots for TTS + LLM
+  gemini: { keys: [], model: 'google/gemini-2.0-flash-001', models: [] }, // 3 slots overflow
+  providers: { // unified view for new settings UI — mirrors openrouter/groq/gemini
+    openrouter: { keys: [], model: '' },
+    groq: { keys: [], model: '' },
+    gemini: { keys: [], model: '' },
+  },
   security: {
     url: process.env.OLLAMA_URL || 'http://127.0.0.1:11434',
     model: process.env.OLLAMA_MODEL || 'hf.co/huihui-ai/Huihui-Qwythos-9B-Claude-Mythos-5-1M-abliterated-GGUF:Q4_K_M',

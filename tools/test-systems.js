@@ -62,10 +62,11 @@ const inlineScript = (file) => {
   const dg = await api('/api/diagnostics');
   const byName = Object.fromEntries((dg.checks || []).map((c) => [c.name, c]));
   ok('diagnostics: readiness report live — 9 checks (incl. v1.0.7 rotation preflight + v1.0.8 audit log), registry 26/26, zero failures, honest warns on key-less cloud + keyless override',
-    dg.ok === true && dg.summary && dg.summary.total === 9 && dg.summary.fails === 0
+    dg.ok === true && dg.summary && dg.summary.total >= 9 && dg.summary.fails === 0
       && byName['skills registry'] && byName['skills registry'].ok === 'ok' && byName['skills registry'].detail === '26/26 skills loaded'
       && byName['cloud brain (OpenRouter)'] && byName['cloud brain (OpenRouter)'].ok === 'warn' && /no keys/.test(byName['cloud brain (OpenRouter)'].detail || '')
-      && byName['cloud brain key rotation'] && /KEYLESS OVERRIDE|3\/3 slots/.test(byName['cloud brain key rotation'].detail || ''));
+      && byName['cloud brain key rotation'] && /KEYLESS OVERRIDE|3\/3 slots/.test(byName['cloud brain key rotation'].detail || '')
+      && byName['tts (Orpheus Groq)'] && byName['multi-agent map']);
   const srvSrc = fs.readFileSync(path.join(__dirname, '..', 'hub', 'server.js'), 'utf8');
   ok('diagnostics: payload masked (no key material) + MAX_DEBUG loud-crash handlers wired',
     !/sk-or-|sk-[A-Za-z0-9]{8}|ghp_[A-Za-z0-9]/i.test(JSON.stringify(dg)) && /installDebugCrashHandlers\(\)/.test(srvSrc) && fs.existsSync(path.join(__dirname, '..', 'hub', 'diagnostics.js')));

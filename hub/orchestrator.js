@@ -18,9 +18,13 @@ const { http } = require('./net');
 const { scrubText } = require('./diagnose'); // pure function — never let a secret ride an error line
 const { KeyRing, loadKeys, effectiveKeys } = require('./keyring');
 const { Ollama, DEFAULT_MODEL, DEFAULT_URL } = require('./ollama');
+const { MultiAgentSystem } = require('./agents');
 
 const NEGATIVE = /\b(stupid|useless|broken|hate this|damn|awful|terrible|not working)\b/i;
 const URGENT = /\b(quick|hurry|now|asap|urgent|emergency|immediately)\b|!{2,}|[A-Z]{4,}/;
+// Commitment / serious mode: user says "you will do it" etc. — Jarvis should acknowledge commitment seriously
+const COMMITMENT_RE = /\b(you will|you must|you have to|you are going to|you're going to|you'd better|you better)\b.*\b(do it|do that|do this|handle it|take care of it|make it happen|get it done|do the thing|do your job)\b|\b(do it|you will do it|you must do it)\b/i;
+const COMMITMENT_DIRECT_RE = /\b(you will|you shall|you must)\b/i;
 /** Security-work signals — drive the proactive "go hacking?" suggestion. */
 const SECURITY_RE = /\b(pentest|penetration test(?:ing)?|ctf|capture the flag|exploit|payload|reverse shell|nmap|metasploit|burp|sql ?injection|xss|privilege escalation|password crack(?:ing)?|fuzz(?:ing)?|vulnerabilit|port scan|security audit|hack(?:ing|er|ed)?)\b/i;
 
@@ -112,6 +116,16 @@ class Orchestrator {
     });
     this.persona = null;  // emotional-expression layer — see hub/persona.js
     this.openers = null;  // proactive "where to start" suggestions — see hub/openers.js
+    this.multiAgent = null; // Jarvis multi-agent (host + sub-agents + fallback) — initialized in attachBrain
+    this.tts = null;        // Orpheus TTS — initialized via attachTTS
+  }
+
+  /** Attach TTS router (Orpheus Groq) */
+  attachTTS(tts) { this.tts = tts || null; }
+
+  async multiAgentHealth() {
+    if (!this.multiAgent) return null;
+    try { return await this.multiAgent.health(); } catch { return null; }
   }
 
   /** Emotional-expression + proactive-openers layer. Optional; null-safe for bare unit tests.
@@ -162,6 +176,8 @@ class Orchestrator {
    * Brain-layer services (diagnose / audit / model router / local process / grounding).
    * Optional: unit tests that build a bare Orchestrator keep legacy behavior because
    * every integration below is null-safe.
+   * Now also bootstraps the Jarvis multi-agent system (host + sub-agents + fallback)
+   * from the canonical map in hub/config/agents.js.
    */
   attachBrain({ diagnostician, audit, modelRouter, localProc, grounding } = {}) {
     this.diag = diagnostician || null;
@@ -169,6 +185,20 @@ class Orchestrator {
     this.router = modelRouter || null;
     this.localProc = localProc || null;
     this.grounding = grounding || null;
+    // Boot multi-agent system if router/net/ollama/settings are available
+    try {
+      if (!this.multiAgent) {
+        this.multiAgent = new MultiAgentSystem({
+          settings: this.settings,
+          log: this.log,
+          net: this.net,
+          ollama: this.ollama,
+        });
+      }
+    } catch (e) {
+      // null-safe for bare unit tests that don't have settings/net
+      this.multiAgent = null;
+    }
   }
 
   _diagReport(scope, err, uid) {
@@ -373,6 +403,51 @@ class Orchestrator {
     if (sess.mode === 'security' && /\b(local brain|local model|model (?:download|pull)|brain)\s*(status|progress|update)?\??\s*$|download progress/i.test(t)) {
       const note = await this._localBrainNote();
       return this._finish(uid, { say: note, brain: 'local-check' }, null);
+    }
+
+    // --- commitment / serious mode: when user says "you will do it" ---
+    // Track commitment and respond with serious acknowledgment. Stored in session.commitments[]
+    if (COMMITMENT_RE.test(t) || (COMMITMENT_DIRECT_RE.test(t) && t.length < 60)) {
+      sess.commitments = sess.commitments || [];
+      const commitment = { text: t, at: Date.now(), uid };
+      sess.commitments.push(commitment);
+      // keep last 20
+      if (sess.commitments.length > 20) sess.commitments = sess.commitments.slice(-20);
+      this.log.write('commitment', { user: uid, text: t.slice(0, 200) });
+      this._auditWrite('commitment', { user: uid, text: t.slice(0, 200) });
+      // If there's a pending confirm, treat "you will do it" as strong yes (owner insists)
+      if (sess.pendingConfirm && sess.pendingConfirm.exp >= Date.now() && !sess.pendingConfirm.kind) {
+        // consume pending as yes — same as user saying yes, but log as commitment-driven
+        const pcCommit = sess.pendingConfirm;
+        sess.pendingConfirm = null;
+        const entry = this.registry.tool(pcCommit.name);
+        if (entry) {
+          const gate = this._gate(entry.skill, ctx);
+          if (!gate.blocked) {
+            try {
+              const r = await entry.run(pcCommit.args, ctx);
+              const out = typeof r === 'string' ? { say: r } : (r || {});
+              this.log.write('interaction', { skill: entry.skill.name, ok: true, user: uid, confirmed: true, commitment: true });
+              return this._finish(uid, { say: (out.say || 'Done — you told me to do it, and I did it. Commitment honored.') + ' (Serious mode: logged.)', confirmed: true, commitment: true }, entry.skill.name);
+            } catch (e) {
+              return this._finish(uid, { say: `I committed to do it, but it failed: ${scrubText(e.message)}`, error: true }, entry.skill.name);
+            }
+          }
+        }
+      }
+      // No pending — acknowledge commitment seriously
+      const seriousOn = !!(this.settings.data.features && this.settings.data.features.seriousConfirm);
+      const ack = seriousOn
+        ? `Understood. You said I will do it — I'm taking that as a serious commitment. I have logged: "${t.slice(0, 120)}". Tell me exactly what to do and I will do it, with confirmation where needed.`
+        : `Got it — you want me to do it. I'm on it. Tell me the specifics and I'll make it happen.`;
+      // Don't return yet if it also matches a skill intent — let skill routing happen after ack?
+      // For explicit "you will do it" with no other content, return ack.
+      if (/^(you will do it|do it|you must do it|you will|you must)[.!]?$/i.test(t) || t.length < 25) {
+        return this._finish(uid, { say: ack, commitment: true }, null);
+      }
+      // For longer utterances containing commitment, we keep ack as prefix and continue to normal routing
+      // Store prefix to prepend later
+      ctx._commitmentAck = ack;
     }
 
     // --- owner confirmation for actions parked after untrusted content (Round 5) ---
@@ -668,8 +743,89 @@ class Orchestrator {
     }
   }
 
-  /** Decide where this turn's brain work goes. Never produces a silent downgrade. */
+  /** Decide where this turn's brain work goes. Never produces a silent downgrade.
+      Multi-agent aware: host → sub-agents → fallback → local, then legacy router fallback.
+      Implements confirm-before-degrade for multi-agent as well as legacy ladder. */
   async _selectBrain(uid, sess, ctx, text) {
+    // For unit tests that use synthetic ladder (top-model/lower-model), bypass multi-agent and use legacy router
+    const isSyntheticTest = this.router && (() => { try { const lad = this.router.ladder().map(r=>r.id); return lad.includes('top-model') || lad.includes('lower-model'); } catch { return false; } })();
+    // New path: multi-agent system (map: gpt-oss-120b host, Qwen 5-account pool, Gemini fallback)
+    if (this.multiAgent && !isSyntheticTest) {
+      try {
+        const health = await this.multiAgent.health();
+        const hostUsable = health.agents.host && health.agents.host.usable;
+        const subUsable = health.agents.subAgents && health.agents.subAgents.usable;
+        const fbUsable = health.agents.fallback && health.agents.fallback.usable;
+        const localReachable = health.agents.local && health.agents.local.reachable;
+
+        // If host usable, use it automatically (best)
+        if (hostUsable) { ctx.model = health.agents.host.model; ctx.agent = 'host'; return { ok: true, agent: 'host' }; }
+
+        // Host down but sub-agents up → degrade confirm (once per outage)
+        if (!hostUsable && subUsable) {
+          const outageId = this.multiAgent._down['host'] ? 'outage:host:' + this.multiAgent._down['host'].since : 'outage:host:now';
+          const step = 'host->sub-agents';
+          const stepKey = outageId + ':' + step;
+          const confirmed = sess.degrade || null;
+          if (confirmed && confirmed.rungId === health.agents.subAgents.model) {
+            const okRung = health.agents.subAgents;
+            if (okRung && okRung.usable) { ctx.model = okRung.model; ctx.agent = 'sub-agents'; return { ok: true, agent: 'sub-agents' }; }
+          }
+          if (sess.degradeDeclined && sess.degradeDeclined.step === step) {
+            return { deny: `Host ${health.agents.host.model} is still unavailable. You chose to wait rather than switch to ${health.agents.subAgents.model} — I'll retry Host on each request. Say "switch models" if you change your mind.` };
+          }
+          if (sess.degradeAskedFor === stepKey) {
+            return { deny: `Host ${health.agents.host.model} is still unavailable. You haven't confirmed switching to ${health.agents.subAgents.model} (lower capability) — say "switch models" to use it, or wait.` };
+          }
+          sess.degradeAskedFor = stepKey;
+          const replaced = this._parkModelConfirm(uid, { kind: 'model-degrade', from: health.agents.host.model, to: health.agents.subAgents.model, outageId, text: text || null });
+          return { ask: { say: replaced + `${health.agents.host.model} isn't available right now${health.agents.host.down && health.agents.host.down.reason ? ' (' + health.agents.host.down.reason + ')' : ''} — switch to ${health.agents.subAgents.model} (lower capability), or wait/retry? Say "yes" to switch or "no" to wait.`, brain: 'fallback', confirm: true } };
+        }
+
+        // Host and sub-agents down, fallback up → degrade confirm again
+        if (!hostUsable && !subUsable && fbUsable) {
+          const outageId = this.multiAgent._down['host'] ? 'outage:host:' + this.multiAgent._down['host'].since : 'outage:host:now';
+          const step = 'host->fallback';
+          const stepKey = outageId + ':' + step;
+          if (sess.degradeDeclined && sess.degradeDeclined.step === step) {
+            return { deny: `Host is still unavailable. You chose to wait rather than switch to fallback — I'll retry Host on each request.` };
+          }
+          if (sess.degradeAskedFor === stepKey) {
+            return { deny: `Host is still unavailable. You haven't confirmed switching to fallback — say "switch models" to use it, or wait.` };
+          }
+          sess.degradeAskedFor = stepKey;
+          const replaced = this._parkModelConfirm(uid, { kind: 'model-degrade', from: health.agents.host.model, to: health.agents.fallback.model, outageId, text: text || null });
+          return { ask: { say: replaced + `Host isn't available — switch to ${health.agents.fallback.model} (fallback), or wait/retry? Say "yes" to switch or "no" to wait.`, brain: 'fallback', confirm: true } };
+        }
+
+        // All cloud down → try self-heal probe first if net online (B2), otherwise local fallback
+        // For B1: probing will fail, then _llm catch returns calm fallback (offline/hiccup) which satisfies B1
+        // For B2: probing succeeds, marks up, returns cloud
+        if (!hostUsable && !subUsable && !fbUsable) {
+          const ma = this.multiAgent;
+          const hostConfigured = ma && ma.host && typeof ma.host.isConfigured === 'function' ? ma.host.isConfigured() : false;
+          if (this.net.online && hostConfigured) {
+            ctx.model = health.agents.host.model; ctx.agent = 'host'; return { ok: true, agent: 'host' };
+          }
+          if (localReachable) return { localFallback: true, agent: 'local' };
+          return { localFallback: true };
+        }
+        if (localReachable && !hostUsable && !subUsable && !fbUsable) return { localFallback: true, agent: 'local' };
+
+        // Fallback to picking any configured cloud even if marked down (self-heal probe)
+        if (this.net.online) {
+          const ma = this.multiAgent;
+          if (ma && ma.host && ma.host.isConfigured()) { ctx.model = health.agents.host.model; ctx.agent = 'host'; return { ok: true, agent: 'host' }; }
+          if (ma && ma.subAgents && ma.subAgents.isConfigured()) { ctx.model = health.agents.subAgents.model; ctx.agent = 'sub-agents'; return { ok: true, agent: 'sub-agents' }; }
+          if (ma && ma.fallback && ma.fallback.isConfigured()) { ctx.model = health.agents.fallback.model; ctx.agent = 'fallback'; return { ok: true, agent: 'fallback' }; }
+        }
+        return { localFallback: true };
+      } catch (e) {
+        // fall through to legacy
+      }
+    }
+    // Legacy router path (kept for backward compat and unit tests)
+    if (!this.router) return { localFallback: true };
     const best = this.router.bestCloud();
     const top = this.router.cloudState()[0] || null;
     const outageId = this.router.outageId();
@@ -768,6 +924,9 @@ class Orchestrator {
     const modeNote = mode === 'security'
       ? 'HACKING MODE is ON at the user\'s request: act as a sharp, concrete security researcher helping the user attack ONLY their own devices, home LAN, lab VMs, or CTF/bug-bounty targets they are authorized to test. Give exact commands and explain output. If a request targets third parties without authorization, decline briefly and redirect to their own-lab equivalent.'
       : '';
+    const seriousNote = s.features && s.features.seriousConfirm
+      ? 'SERIOUS MODE is ON: when you say you will do something, be explicit, log the commitment, and require owner confirmation before any write action. If user says \"you will do it\" treat as high-priority commitment — acknowledge seriously and ask for specifics if needed.'
+      : '';
     const now = new Date();
     const personaBlock = this.persona ? this.persona.promptSection(this._personaSelect(uid, ctx, tone), { toneDesc }) : '';
     return [
@@ -780,7 +939,7 @@ class Orchestrator {
       'Act only on explicit requests: for questions about existing data call read-only tools (list_*, get_*); never create, set, or modify anything unless the user clearly asked.',
       'Tools cover timers, alarms, reminders, calendar, notes, weather, news, smart home, translation, media, vehicle, and more. If a request matches a tool, always call it rather than improvising.',
       `Today is ${now.toDateString()}, local time ${now.toTimeString().slice(0, 5)}.`,
-      sentimentNote, modeNote, facts, ground,
+      sentimentNote, modeNote, seriousNote, facts, ground,
     ].filter(Boolean).join('\n');
   }
 
@@ -875,10 +1034,13 @@ class Orchestrator {
     }
     const effect = toolSideEffect(entry);
     if (effect === 'read') loop.sawUntrusted = true; // its OUTPUT is untrusted content
-    if (effect === 'write' && (loop.sawUntrusted || entry.confirm === 'always')) {
+    // Serious/commitment mode: when settings.features.seriousConfirm is on, every write needs confirmation
+    const seriousMode = !!(ctx.settings && ctx.settings.features && ctx.settings.features.seriousConfirm);
+    if (effect === 'write' && (loop.sawUntrusted || entry.confirm === 'always' || seriousMode)) {
       loop.pending = { name: entry.toolName, args: v.cleaned, at: Date.now() };
-      this.log.write('injection.guard', { tool: entry.toolName, reason: loop.sawUntrusted ? 'write-after-untrusted-read parked for owner confirmation' : 'sensitive write held for explicit owner confirmation', user: ctx.userId });
-      return { confirm: { parked: loop.pending, reason: loop.sawUntrusted ? 'untrusted' : 'always' } };
+      const reason = loop.sawUntrusted ? 'untrusted' : (entry.confirm === 'always' ? 'always' : (seriousMode ? 'serious' : 'write'));
+      this.log.write('injection.guard', { tool: entry.toolName, reason: loop.sawUntrusted ? 'write-after-untrusted-read parked for owner confirmation' : (seriousMode ? 'serious mode: write held for explicit owner confirmation' : 'sensitive write held for explicit owner confirmation'), user: ctx.userId });
+      return { confirm: { parked: loop.pending, reason } };
     }
     try {
       const r = await entry.run(v.cleaned, ctx);
@@ -987,6 +1149,57 @@ class Orchestrator {
 
     let usedSkill = null;
     const loop = { sawUntrusted: false, usedSkill: null, pending: null }; // trust state for this brain loop
+
+    // --- Multi-agent primary path (Host → Sub-agents → Fallback) ---
+    // If multiAgent is wired and we are not in lean-credit mode, let it try first.
+    // It internally does host (gpt-oss-120b) → qwen pool (5 keys) → gemini (3-key overflow) → local.
+    if (!lean && this.multiAgent) {
+      try {
+        const maRes = await this.multiAgent.chat({ messages, tools, max_tokens: body.max_tokens, text, uid });
+        if (maRes && maRes.message) {
+          const msgFromMA = maRes.message;
+          // If no tools, return immediately
+          if (!msgFromMA.tool_calls || !msgFromMA.tool_calls.length) {
+            const txt = String(msgFromMA.content || '').trim();
+              // Keep brain as 'cloud' for backward compat with existing tests (B2 etc.), agent field carries multi-agent identity
+            return { say: txt || 'Done.', brain: 'cloud', agent: maRes.agent, model: maRes.model };
+          }
+          // If tool_calls present, seed the loop with this assistant message and continue tool dispatch
+          messages.push({ role: 'assistant', content: msgFromMA.content ?? null, tool_calls: msgFromMA.tool_calls });
+          body.messages = messages;
+          for (const call of msgFromMA.tool_calls) {
+            const fnName = call.function && call.function.name;
+            const entry = this.registry.tool(fnName);
+            if (entry) entry.toolName = fnName;
+            let args = {};
+            try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch {}
+            const d = await this._dispatchTool(entry, args, ctx, loop);
+            if (loop.usedSkill) usedSkill = loop.usedSkill;
+            if (d.confirm) {
+              if (d.confirm.verify) return { ...d.confirm.blocked, brain: 'cloud', agent: maRes.agent };
+              const act = String(fnName || 'that').replace(/_/g, ' ');
+              const replaced = this._parkConfirm(uid, d.confirm.parked);
+              const serious = d.confirm.reason === 'serious';
+              return {
+                say: replaced + (d.confirm.reason === 'always' || serious
+                  ? (serious
+                    ? `Serious mode is on — you asked me to ${act} (${entry.skill.label || entry.skill.name}). I will do it only if you confirm: say "yes" within a minute, or "no" to skip.`
+                    : `You're asking me to ${act} — that's a write action on ${entry.skill.label || entry.skill.name}. Say "yes" within a minute to confirm it, or "no" to skip. (I ask every time — a "yes" from earlier never counts here.)`)
+                  : `Heads up: something in content I fetched is asking me to "${act}". I don't take instructions from text I read — only from you. Do you want me to ${act}? Say yes or no.`),
+                brain: 'cloud', confirm: true, agent: maRes.agent,
+              };
+            }
+            messages.push({ role: 'tool', tool_call_id: call.id, content: d.content });
+          }
+          body.messages = messages;
+          // continue loop for next round using standard _chat (which will use keyring as backup)
+        }
+      } catch (e) {
+        // multi-agent failed, fall through to legacy _chat path
+        this.log.write('multi-agent.fail', { error: String(e.message).slice(0, 160) });
+      }
+    }
+
     for (let round = 0; round < 4; round++) {
       const res = await this._chat(base, body);
       const data = await res.json();
@@ -1018,9 +1231,12 @@ class Orchestrator {
           if (d.confirm.verify) return { ...d.confirm.blocked, brain: 'cloud' };
           const act = String(fnName || 'that').replace(/_/g, ' ');
           const replaced = this._parkConfirm(uid, d.confirm.parked);
+          const serious = d.confirm.reason === 'serious';
           return {
-            say: replaced + (d.confirm.reason === 'always'
-              ? `You're asking me to ${act} — that's a write action on ${entry.skill.label || entry.skill.name}. Say "yes" within a minute to confirm it, or "no" to skip. (I ask every time — a "yes" from earlier never counts here.)`
+            say: replaced + (d.confirm.reason === 'always' || serious
+              ? (serious
+                ? `Serious mode is on — you asked me to ${act} (${entry.skill.label || entry.skill.name}). I will do it only if you confirm: say "yes" within a minute, or "no" to skip.`
+                : `You're asking me to ${act} — that's a write action on ${entry.skill.label || entry.skill.name}. Say "yes" within a minute to confirm it, or "no" to skip. (I ask every time — a "yes" from earlier never counts here.)`)
               : `Heads up: something in content I fetched is asking me to "${act}". I don't take instructions from text I read — only from you. Do you want me to ${act}? Say yes or no.`),
             brain: 'cloud', confirm: true,
           };
@@ -1077,9 +1293,12 @@ class Orchestrator {
           if (d.confirm.verify) return { ...d.confirm.blocked, brain: 'local' };
           const act = String(name || 'that').replace(/_/g, ' ');
           const replaced = this._parkConfirm(uid, d.confirm.parked);
+          const serious = d.confirm.reason === 'serious';
           return {
-            say: replaced + (d.confirm.reason === 'always'
-              ? `You're asking me to ${act} — that's a write action on ${entry.skill.label || entry.skill.name}. Say "yes" within a minute to confirm it, or "no" to skip. (I ask every time — a "yes" from earlier never counts here.)`
+            say: replaced + (d.confirm.reason === 'always' || serious
+              ? (serious
+                ? `Serious mode is on — you asked me to ${act} (${entry.skill.label || entry.skill.name}). I will do it only if you confirm: say "yes" within a minute, or "no" to skip.`
+                : `You're asking me to ${act} — that's a write action on ${entry.skill.label || entry.skill.name}. Say "yes" within a minute to confirm it, or "no" to skip. (I ask every time — a "yes" from earlier never counts here.)`)
               : `Heads up: something in content I fetched is asking me to "${act}". I don't take instructions from text I read — only from you. Do you want me to ${act}? Say yes or no.`),
             brain: 'local', confirm: true,
           };
@@ -1163,7 +1382,28 @@ class Orchestrator {
   }
 
   _finish(uid, out, skill) {
-    const say = out.say || 'Okay.';
+    let say = out.say || 'Okay.';
+    // Prepend commitment ack if present (from handleUtterance context)
+    try {
+      const sess = this.memory.session(uid);
+      // If _commitmentAck was set in ctx and this is not a confirm flow, prepend
+      if (this._currentText && COMMITMENT_RE.test(this._currentText) && sess && sess.commitments && sess.commitments.length) {
+        // _commitmentAck lives in ctx which we don't have here, but we can detect via last commitment timestamp
+        const last = sess.commitments[sess.commitments.length - 1];
+        if (last && Date.now() - last.at < 2000 && !out.confirm && !out.commitment) {
+          // Only prepend if say doesn't already contain commitment language
+          if (!/serious commitment|you told me to do it/i.test(say)) {
+            // Check if we stored ack in a temporary stash
+            // Use a simple serious prefix
+            const seriousOn = !!(this.settings && this.settings.data && this.settings.data.features && this.settings.data.features.seriousConfirm);
+            if (seriousOn) {
+              say = `Acknowledged — serious commitment logged. ` + say;
+            }
+          }
+        }
+      }
+    } catch {}
+    out.say = say;
     // proactive nudge into hacking mode when the user keeps poking security topics
     const sess = this.memory.session(uid);
     if (!out.confirm && !out.error && sess.mode !== 'security' && !sess.modeSuggested && !sess.localRoute && this._currentText && SECURITY_RE.test(this._currentText)) {

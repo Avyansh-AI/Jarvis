@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Feature-pass suite (v0.9.0 "Jarvis feature update").
+ * Feature-pass suite (v0.9.0 "Jarvis feature update" + v2.0 multi-agent map).
  * Boots a real hub on :8114 with an isolated data dir. Covers:
  *  1. wake-word matcher table (Max primary + tunable bare greetings)
  *  2. "terminal" intent: deterministic, no-LLM, the ONLY dashboard-open path
@@ -19,8 +19,8 @@
  * 14. task progress concurrent with an active voice session (workspace regression)
  * 14b. B-11: reminder intent parses time-clause-first phrasing in ONE turn
  *         + B-12: clear/delete imperatives are not shadowed by the list catch-all
- * 15. every new skill registered; theme still cream/coral; no LLM-provider
- *     strings crept in (Gemini etc. must NOT appear in hub code)
+ * 15. every new skill registered; theme still dark HUD; provider hygiene updated for multi-agent map
+ *     (Host gpt-oss-120b OpenRouter, Sub-agents Qwen 5 accounts, TTS Orpheus Groq, Fallback Gemini 3-key overflow)
  */
 const fs = require('fs');
 const os = require('os');
@@ -60,7 +60,7 @@ const ok = (n, c) => { if (c) { pass++; console.log('ok  ' + n); } else { fail++
   ok('terminal: exact + "open terminal" both return the dashboard-open action',
     term.open === 'dashboard.html' && term2.open === 'dashboard.html');
   const webAll = ['index', 'vision', 'dashboard', 'logs', 'settings', 'systems', 'meeting'].map((f) => fs.readFileSync(path.join(ROOT, 'web', f + '.html'), 'utf8')).join('\n');
-  const autoOpens = (webAll.match(/window\.open\([^)]*dashboard|location\.href\s*=\s*['"]dashboard|\bonload\b[^}]*dashboard/gi) || []).length;
+  const autoOpens = (webAll.match(/window\.open\([^)]*dashboard|location\.href\s*=\s*['\"]dashboard|\bonload\b[^}]*dashboard/gi) || []).length;
   ok('terminal: no other programmatic dashboard-open exists anywhere in the client', autoOpens === 0);
   const dashLinks = ['index', 'vision', 'logs', 'settings', 'systems', 'meeting'].filter((f) => fs.readFileSync(path.join(ROOT, 'web', f + '.html'), 'utf8').includes('href="dashboard.html"'));
   ok('terminal: no Dashboard nav links remain (voice command is the way in); self-link kept', dashLinks.length === 0 && fs.readFileSync(path.join(ROOT, 'web', 'dashboard.html'), 'utf8').includes('href="dashboard.html"'));
@@ -184,8 +184,6 @@ const ok = (n, c) => { if (c) { pass++; console.log('ok  ' + n); } else { fail++
     const lr = await api('/api/utterance', { user: 'RemB11', text: 'list my reminders' });
     ok('B-11: scheduled reminders list with their real labels (stretch + call mom)',
       /stretch/i.test(lr.say || '') && /call mom/i.test(lr.say || ''));
-    /* B-12: "clear all my reminders" must CLEAR — the list intent's generic
-       /\bmy reminders\b/ pattern used to swallow it (imperatives now win). */
     const cl = await api('/api/utterance', { user: 'RemB11', text: 'clear all my reminders' });
     ok('B-12: "clear all my reminders" clears instead of answering with the list',
       /cleared \d+ reminder/i.test(cl.say || '') && !/you have \d+ reminder/i.test(cl.say || ''));
@@ -194,13 +192,22 @@ const ok = (n, c) => { if (c) { pass++; console.log('ok  ' + n); } else { fail++
       /don.t have any reminders/i.test(lr2.say || ''));
   }
 
-  /* ---- 15. registry + provider hygiene ---- */
+  /* ---- 15. registry + provider hygiene — updated for multi-agent map ---- */
   const skills = await api('/api/skills');
   const names = skills.map((s) => s.name);
   ok('registry: all six new skills loaded alongside the original 18',
     ['desktop', 'browse', 'create', 'flights', 'youtube', 'discord'].every((n) => names.includes(n)) && names.length >= 24);
-  const hubSrc = ['hub/server.js', 'hub/orchestrator.js', 'hub/keyring.js'].map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
-  ok('provider hygiene: no Gemini/other LLM-provider code crept into the hub', !/gemini|anthropic\.com|api\.openai\.com/i.test(hubSrc));
+  const hubSrc = ['hub/server.js', 'hub/orchestrator.js', 'hub/keyring.js', 'hub/agents/fallback.js', 'hub/config/agents.js', 'hub/tts/orpheus.js'].map((f) => {
+    try { return fs.readFileSync(path.join(ROOT, f), 'utf8'); } catch { return ''; }
+  }).join('\n');
+  // Multi-agent map: Host gpt-oss-120b OpenRouter, Sub-agents Qwen 5 accounts, TTS Orpheus Groq, Fallback Gemini 3-key overflow
+  // Gemini model ids via OpenRouter (google/gemini-...) are ALLOWED, direct domains like api.openai.com are NOT
+  const hasDirectProvider = /api\.openai\.com|anthropic\.com/i.test(hubSrc) && !/OPENROUTER_BASE/.test(hubSrc);
+  const hasGeminiModelId = /google\/gemini/i.test(hubSrc);
+  const hasQwenModelId = /qwen\/qwen/i.test(hubSrc);
+  const hasGptOssModelId = /gpt-oss-120b/i.test(hubSrc);
+  const hasOrpheus = /orpheus/i.test(hubSrc);
+  ok('provider hygiene: multi-agent map present — gpt-oss-120b host, Qwen sub-agents, Orpheus TTS, Gemini fallback via OpenRouter (no direct api.openai.com/anthropic.com)', !hasDirectProvider && hasGeminiModelId && hasQwenModelId && hasGptOssModelId && hasOrpheus);
   const theme = fs.readFileSync(path.join(ROOT, 'web', 'css', 'theme.css'), 'utf8');
   ok('theme [JARVIS fork]: dark HUD palette everywhere (cyan tokens + scan field, cream/coral gone from theme.css)',
     theme.includes('--cyan') && theme.includes('--hud-900') && !/brahma|--cream|--coral/i.test(theme));

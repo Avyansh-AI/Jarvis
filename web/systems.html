@@ -25,6 +25,18 @@
   .need-sev.warn { color: var(--red); }
   .need-sev.info { color: var(--ink-dim); }
   .toolbar { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  /* Multi-agent map styling */
+  .agent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+  .agent-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: rgba(255,255,255,0.02); }
+  .agent-card h4 { margin: 0 0 6px; font-size: 13px; letter-spacing: 0.5px; text-transform: uppercase; }
+  .agent-card .model { font-family: monospace; font-size: 11px; color: var(--cyan); word-break: break-all; }
+  .agent-card .meta { font-size: 11px; color: var(--ink-dim); margin-top: 6px; line-height: 1.4; }
+  .agent-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-left: 6px; }
+  .agent-badge.ok { background: var(--teal); color: #000; }
+  .agent-badge.warn { background: var(--red); color: #fff; }
+  .agent-badge.bad { background: #333; color: var(--ink-dim); }
+  .agent-badge.info { background: var(--line); color: var(--ink-dim); }
+  .map-line { font-family: monospace; font-size: 12px; color: var(--ink-dim); margin: 8px 0; white-space: pre; }
 </style>
 </head>
 <body>
@@ -44,11 +56,22 @@
   <section class="card" style="grid-column:1/-1" aria-labelledby="s-verdict">
     <h3 id="s-verdict">Systems readout</h3>
     <div class="verdict" id="verdict">Probing all systems…</div>
-    <div class="muted" id="verdictSub">Jarvis-style status: every capability, what’s blocking it, and the fix.</div>
+    <div class="muted" id="verdictSub">Jarvis multi-agent architecture + every capability, what's blocking it, and the fix.</div>
     <div class="toolbar">
       <button class="btn ghost" id="b-refresh" type="button">Refresh</button>
       <span class="muted" id="stamp"></span>
     </div>
+  </section>
+
+  <!-- NEW: Multi-Agent Map -->
+  <section class="card" style="grid-column:1/-1" aria-labelledby="s-agents">
+    <h3 id="s-agents">Jarvis Multi-Agent Map</h3>
+    <div class="map-line" id="mapLine">Jarvis (Multi-agent assistant)
+ ├─ Host      → gpt-oss-120b  [OpenRouter]
+ ├─ Sub-agents → Qwen3.6-27b ×5 accounts
+ ├─ TTS       → Orpheus      [Groq TTS]
+ └─ Fallback  → Gemini       [3-key overflow]</div>
+    <div class="agent-grid" id="agentGrid"><div class="muted">Loading agents…</div></div>
   </section>
 
   <section class="card" style="grid-column:1/-1" aria-labelledby="s-cap">
@@ -76,12 +99,12 @@
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   function inIframe() { try { return window.self !== window.top; } catch { return true; } }
-  function policyAllows(feature) { // null = browser can't tell
+  function policyAllows(feature) {
     const pp = document.permissionsPolicy || document.featurePolicy;
     if (!pp || !pp.allowsFeature) return null;
     try { return !!pp.allowsFeature(feature); } catch { return null; }
   }
-  async function permState(name) { // 'granted' | 'prompt' | 'denied' | null (unsupported)
+  async function permState(name) {
     try {
       if (!navigator.permissions || !navigator.permissions.query) return null;
       return (await navigator.permissions.query({ name })).state;
@@ -116,13 +139,53 @@
   const rows = [];
   const row = (name, state, what, fix) => rows.push({ name, state, what, fix: fix || '' });
 
+  function renderAgents(agents, tts) {
+    const grid = $('agentGrid');
+    if (!agents && !tts) { grid.innerHTML = '<div class="muted">No agent data.</div>'; return; }
+    const list = [];
+    const map = (agents && agents.map) || null;
+    const ag = (agents && agents.agents) || {};
+    // Host
+    if (ag.host || (map && map.agents && map.agents.host)) {
+      const h = ag.host || map.agents.host;
+      const status = h.usable ? 'ok' : (h.configured ? 'warn' : 'bad');
+      list.push(`<div class="agent-card"><h4>Host <span class="agent-badge ${status}">${h.status || status}</span></h4><div class="model">${(h.model||'openai/gpt-oss-120b')}</div><div class="meta">Primary brain · gpt-oss-120b via OpenRouter · ${h.keys||0} key(s) · ${h.usable?'usable':'not usable'}<br>${h.down? 'Down: '+h.down.reason : ''}</div></div>`);
+    }
+    // Sub-agents
+    if (ag.subAgents || (map && map.agents && map.agents.subAgents)) {
+      const s = ag.subAgents || map.agents.subAgents;
+      const status = s.usable ? 'ok' : (s.configured ? 'warn' : 'bad');
+      const workers = s.workers ? s.workers.map(w=>`${w.id}:${w.busy?'busy':'idle'}`).join(', ') : '5 workers';
+      list.push(`<div class="agent-card"><h4>Sub-agents <span class="agent-badge ${status}">${s.status||status}</span></h4><div class="model">${(s.model||'qwen/qwen3-27b')} ×${s.count||5}</div><div class="meta">Parallel Qwen3.6-27b pool · ${s.keys||0} key(s) · ${workers}<br>${s.down? 'Down: '+s.down.reason : ''}</div></div>`);
+    }
+    // TTS
+    const t = (tts && tts.primary) || (agents && agents.tts) || tts;
+    if (t) {
+      const tp = t.primary || t;
+      const status = tp.configured ? 'ok' : 'warn';
+      list.push(`<div class="agent-card"><h4>TTS <span class="agent-badge ${status}">${tp.status||status}</span></h4><div class="model">${(tp.model||'orpheus')} · voice ${tp.voice||'tara'}</div><div class="meta">Orpheus via Groq TTS · ${tp.configured?'configured':'browser fallback'}<br>Provider: ${tp.provider||'groq'}</div></div>`);
+    }
+    // Fallback
+    if (ag.fallback || (map && map.agents && map.agents.fallback)) {
+      const f = ag.fallback || map.agents.fallback;
+      const status = f.usable ? 'ok' : (f.configured ? 'warn' : 'bad');
+      list.push(`<div class="agent-card"><h4>Fallback <span class="agent-badge ${status}">${f.status||status}</span></h4><div class="model">${(f.model||'google/gemini-2.0-flash-001')}</div><div class="meta">Safety net · Gemini 3-key overflow · ${f.keys||0} key(s) · ${f.overflow?'overflow':''}<br>${f.down? 'Down: '+f.down.reason : ''}</div></div>`);
+    }
+    // Local
+    if (ag.local) {
+      const l = ag.local;
+      const status = l.reachable ? 'ok' : 'warn';
+      list.push(`<div class="agent-card"><h4>Local <span class="agent-badge ${status}">${l.reachable?'ok':'offline'}</span></h4><div class="model">${(l.model||'local')}</div><div class="meta">Ollama fallback · ${l.url||''}<br>Reachable: ${l.reachable}</div></div>`);
+    }
+    grid.innerHTML = list.join('') || '<div class="muted">No agents configured.</div>';
+  }
+
   async function run() {
     rows.length = 0;
     $('sysList').innerHTML = '';
     $('needList').innerHTML = '';
     $('verdict').textContent = 'Probing all systems…';
 
-    /* --- hub truth first; every later row grades itself against it --- */
     let S = null;
     try { S = await MAX.get('/api/status'); } catch {}
     row('Hub link', S ? 'ok' : 'bad',
@@ -131,6 +194,20 @@
     $('hubChip').classList.toggle('on', !!S);
     $('hubChipText').textContent = S ? 'online' : 'unreachable';
     if (!S) { finish(); return; }
+
+    // Multi-agent fetch (parallel, non-blocking)
+    try {
+      const [agents, tts] = await Promise.all([
+        MAX.get('/api/agents').catch(()=>null),
+        MAX.get('/api/tts').catch(()=>null),
+      ]);
+      // Merge S.agents if present
+      const mergedAgents = S.agents || agents;
+      const mergedTTS = S.tts || tts;
+      renderAgents(mergedAgents, mergedTTS);
+    } catch {
+      $('agentGrid').innerHTML = '<div class="muted">Agent probe failed.</div>';
+    }
 
     const wsOk = await wsProbe();
     row('Realtime link', wsOk ? 'ok' : 'warn',
@@ -165,19 +242,30 @@
       SR && micState !== 'bad' ? '“Hey Jarvis” can listen in the background (toggle on the main page).' : 'Depends on speech recognition + mic — blocked until those rows are green.',
       SR && micState !== 'bad' ? '' : 'Fix the microphone/recognition rows above.');
 
-    /* brains */
-    row('Cloud brain', S.brain !== 'cloud' ? 'warn' : S.openrouter.keys === 0 ? 'bad' : S.openrouter.lastFail ? 'warn' : 'ok',
+    row('Cloud brain (Host)', S.brain !== 'cloud' ? 'warn' : S.openrouter.keys === 0 ? 'bad' : S.openrouter.lastFail ? 'warn' : 'ok',
       S.brain !== 'cloud' ? 'Off by choice — brain is set to ' + S.brain + '.'
         : S.openrouter.keys === 0 ? 'No OpenRouter keys configured — chat falls back to intent skills only.'
         : S.openrouter.lastFail ? `${S.openrouter.keys} key(s) loaded, but a key was rejected recently (${S.openrouter.lastFail.status === 402 ? 'free-tier credit/prompt token cap hit' : S.openrouter.lastFail.status === 401 ? 'unauthorized — invalid/revoked' : 'HTTP ' + (S.openrouter.lastFail.status || S.openrouter.lastFail.reason || 'error')}).`
         : `${S.openrouter.keys} key(s) rotating${S.openrouter.model ? ' · ' + S.openrouter.model : ''}.`,
       S.brain !== 'cloud' ? '' : S.openrouter.keys === 0 ? 'Settings → OpenRouter Keys to add a key.' : (S.openrouter.lastFail ? (S.openrouter.lastFail.status === 402 ? 'Add credit, or pick a smaller free model — chat answers lean-mode meanwhile.' : 'Top up credit or replace/re-rotate keys in Settings → OpenRouter Keys.') : ''));
+
+    // New rows from multi-agent map
+    if (S.agents) {
+      const ag = S.agents.agents || {};
+      if (ag.host) row('Host agent (gpt-oss-120b)', ag.host.usable ? 'ok' : ag.host.configured ? 'warn' : 'bad', `${ag.host.model} · ${ag.host.keys||0} keys · ${ag.host.status}`, ag.host.down? ag.host.down.reason : '');
+      if (ag.subAgents) row('Sub-agents pool (Qwen3.6-27b ×5)', ag.subAgents.usable ? 'ok' : ag.subAgents.configured ? 'warn' : 'bad', `${ag.subAgents.model} ×${ag.subAgents.count||5} · ${ag.subAgents.keys||0} keys · workers ${ag.subAgents.workers? ag.subAgents.workers.length : 5}`, ag.subAgents.down? ag.subAgents.down.reason : '');
+      if (ag.fallback) row('Fallback (Gemini 3-key overflow)', ag.fallback.usable ? 'ok' : ag.fallback.configured ? 'warn' : 'bad', `${ag.fallback.model} · ${ag.fallback.keys||0} keys · overflow`, ag.fallback.down? ag.fallback.down.reason : '');
+    }
+    if (S.tts) {
+      const tp = S.tts.primary || S.tts;
+      row('TTS (Orpheus Groq)', tp.configured ? 'ok' : 'warn', `${tp.model||'orpheus'} · voice ${tp.voice||'tara'} · ${tp.configured?'Groq configured':'browser fallback'}`, tp.configured ? '' : 'Set GROQ_API_KEY in .env for cloud TTS, or browser speechSynthesis will be used.');
+    }
+
     row('Local brain', S.ollama.reachable === true ? 'ok' : (S.brain === 'local' ? 'bad' : 'warn'),
       S.ollama.reachable === true ? `Ollama reachable at ${S.ollama.url || 'default address'}.`
         : S.ollama.url ? `Ollama not answering at ${S.ollama.url} — local + hacking modes will fall back.` : 'Ollama not configured.',
       S.brain === 'local' && S.ollama.reachable === false ? 'Start Ollama (`ollama serve`) or switch the brain to cloud.' : (S.ollama.reachable === false && S.ollama.url ? 'Only needed for local/hacking modes — start it when you need it.' : ''));
 
-    /* senses + outputs */
     const camPerm = await permState('camera');
     row('Camera', camPerm === 'denied' || (!window.isSecureContext) || (inIframe() && camPol === false) ? 'bad' : camPerm === 'granted' ? 'ok' : 'warn',
       camPerm === 'granted' ? 'Permission granted — Vision page is ready.'
@@ -188,9 +276,10 @@
 
     const voices = await ttsVoices();
     const textOnly = MAX.LS.get('textOnly', false);
-    row('Voice output', textOnly ? 'warn' : voices === null ? 'warn' : voices.length ? 'ok' : 'warn',
+    row('Voice output (browser fallback)', textOnly ? 'warn' : voices === null ? 'warn' : voices.length ? 'ok' : 'warn',
       textOnly ? 'Text-only mode is ON — I stay silent by choice. Speech synthesis itself is ' + (voices && voices.length ? 'fine.' : 'also unavailable.')
-        : voices === null ? 'This browser has no speech synthesis — replies are text-only.' : voices.length ? `${voices.length} system voice(s) ready.` : 'No voices found — replies stay silent until one is installed.',
+        : voices === null ? 'This browser has no speech synthesis — replies are text-only.' : voices.length ? `${voices.length} system voice(s) ready.`
+        : 'No voices found — replies stay silent until one is installed.',
       textOnly ? 'Settings → Text-only mode, if you want sound back.' : (voices && voices.length ? '' : 'Install any system voice (OS speech settings).'));
 
     const notifyOn = MAX.LS.get('notifications', false);
@@ -199,7 +288,6 @@
       !notifyOn ? 'Off in Settings by choice — reminders will only toast in-page.' : notifPerm === 'granted' ? 'System notifications will fire for alarms and nudges.' : 'Enabled but the browser won’t show them (' + notifPerm + ').',
       !notifyOn ? '' : (notifPerm === 'denied' ? 'Lock/tune icon → allow Notifications.' : 'Tap Settings → System notifications to re-request.'));
 
-    /* hub-managed capabilities */
     row('Voice verification', S.security.lockedUsers.length ? 'bad' : S.security.anyVoiceprint ? 'ok' : 'warn',
       S.security.lockedUsers.length ? `Frozen for ${S.security.lockedUsers.map((l) => l.user).join(', ')} (${S.security.lockedUsers[0].secondsLeft}s left) after repeated failures.`
         : S.security.anyVoiceprint ? 'A voiceprint is enrolled — locks/garage/finance can be voice-gated.' : 'No voiceprint enrolled yet.',
@@ -261,7 +349,6 @@
   $('b-refresh').onclick = run;
   run();
   setInterval(run, 30000);
-  /* boot diagnostics card — the /api/diagnostics readiness report, visible */
   MAX.get('/api/diagnostics').then((d) => {
     const ICON = { ok: '✓', warn: '⚠', fail: '✗' };
     const clean = (s) => String(s ?? '').replace(/[<>&]/g, '');

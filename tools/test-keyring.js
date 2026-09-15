@@ -12,6 +12,7 @@ process.env.OPENROUTER_KEY_1 = 'bad-key-1';
 process.env.OPENROUTER_KEY_2 = 'good-key-2';
 process.env.OPENROUTER_KEY_3 = 'spare-key-3';
 process.env.OLLAMA_URL = ''; // force cloud-or-nothing for this test
+process.env.MAX_NET_PROBE_URL = 'http://127.0.0.1:8912/probe'; // keep net.online true in offline sandbox
 // Isolate the data dir: a real settings store carries UI-managed keys that
 // would (correctly) win over env keys — and printing them would leak secrets.
 process.env.MAX_DATA_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'max-keyring-'));
@@ -20,11 +21,17 @@ const http = require('http');
 const attempts = [];
 
 const mock = http.createServer(async (req, res) => {
+  if (req.method === 'GET') {
+    // net probe + health
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{}');
+    return;
+  }
   let raw = '';
   for await (const c of req) raw += c;
   const auth = req.headers.authorization || '';
   const key = auth.replace(/^Bearer /, '');
-  attempts.push(key);
+  if (req.url.includes('/chat/completions')) attempts.push(key);
   if (key !== 'good-key-2') {
     res.writeHead(429, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: { message: 'rate limited' } }));
@@ -39,7 +46,7 @@ const mock = http.createServer(async (req, res) => {
 (async () => {
   await new Promise((r) => mock.listen(8912, '127.0.0.1', r));
   require('../hub/server.js'); // boots hub on :8093
-  await new Promise((r) => setTimeout(r, 800));
+  await new Promise((r) => setTimeout(r, 1200));
 
   const say = (t) => fetch('http://127.0.0.1:8093/api/utterance', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }),

@@ -82,8 +82,20 @@ class ModelRouter {
 
   ladder() {
     const s = this.settings.data || {};
+    // New multi-agent map is the default ladder (Host → Sub-agents → Fallback → Local)
+    // If MODEL_PRIORITY is explicitly set, respect it; otherwise use the map.
+    if (!this.env.MODEL_PRIORITY) {
+      try {
+        const { modelLadder } = require('./config/agents');
+        const ladder = modelLadder();
+        return parsePriority(ladder.join(','), {
+          cloudModel: (s.openrouter && s.openrouter.model) || this.env.OPENROUTER_MODEL || 'openai/gpt-oss-120b',
+          ollamaModel: (s.security && s.security.model) || this.env.OLLAMA_MODEL || 'local-model',
+        });
+      } catch {}
+    }
     return parsePriority(this.env.MODEL_PRIORITY, {
-      cloudModel: (s.openrouter && s.openrouter.model) || this.env.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4-5',
+      cloudModel: (s.openrouter && s.openrouter.model) || this.env.OPENROUTER_MODEL || 'openai/gpt-oss-120b',
       ollamaModel: (s.security && s.security.model) || this.env.OLLAMA_MODEL || 'local-model',
     });
   }

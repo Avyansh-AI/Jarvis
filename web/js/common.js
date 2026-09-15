@@ -1,5 +1,7 @@
-/* Jarvis — shared client helpers (all pages). */
-window.Jarvis = (() => {
+/* Jarvis — shared client helpers (all pages). 
+   Provides both window.Jarvis and window.MAX for backward compat — all pages use MAX.
+*/
+const _JarvisCore = (() => {
   const LS = {
     get: (k, d = null) => { try { const v = JSON.parse(localStorage.getItem('max.' + k)); return v ?? d; } catch { return d; } },
     set: (k, v) => localStorage.setItem('max.' + k, JSON.stringify(v)),
@@ -100,3 +102,10 @@ window.Jarvis = (() => {
 
   return { LS, user, token, api, get, post, wsUrl, speak, stopSpeaking, notify, applyPrefs, get voices() { loadVoices(); return voices; } };
 })();
+// Expose as both Jarvis and MAX — every page (index, settings, systems, etc.) uses MAX
+// Preserve any pre-existing MAX.widgets (if widgets.js loaded first in some edge order)
+const _existingWidgets = (window.MAX && window.MAX.widgets) ? window.MAX.widgets : null;
+window.MAX = window.MAX || {};
+Object.assign(window.MAX, _JarvisCore);
+if (_existingWidgets) window.MAX.widgets = _existingWidgets;
+window.Jarvis = window.MAX; // alias

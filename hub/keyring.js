@@ -61,6 +61,24 @@ function loadKeys(env = process.env) {
   return list;
 }
 
+function loadGroqKeys(env = process.env) {
+  const list = [];
+  for (let n = 1; n <= 16; n++) {
+    const v = env['GROQ_API_KEY_' + n] || (n === 1 ? env['GROQ_API_KEY'] : '');
+    if (v && v.trim()) list.push(v.trim());
+  }
+  return list;
+}
+
+function loadGeminiKeys(env = process.env) {
+  const list = [];
+  for (let n = 1; n <= 16; n++) {
+    const v = env['GEMINI_KEY_' + n] || env['GEMINI_API_KEY_' + n] || (n === 1 ? env['GEMINI_API_KEY'] || env['GOOGLE_API_KEY'] : '');
+    if (v && v.trim()) list.push(v.trim());
+  }
+  return list;
+}
+
 /** Which canonical slots (1..3) are empty — boot preflight reports these by name. */
 function missingSlots(env = process.env, need = 3) {
   const missing = [];
@@ -69,12 +87,61 @@ function missingSlots(env = process.env, need = 3) {
 }
 
 /**
- * Effective key list: .env ONLY (v1.0.7). The settingsData argument is kept for
- * call-site compatibility but is deliberately ignored — the Settings UI no
- * longer holds keys (hub/keymigrate.js folded them into .env at boot).
+ * Effective key list: .env + settings store (new UI). Settings keys are merged in,
+ * .env remains primary source. This allows the Settings page to manage keys while
+ * keeping .env as fallback.
  */
 function effectiveKeys(settingsData, env = process.env) {
-  return loadKeys(env);
+  const fromEnv = loadKeys(env);
+  const fromSettings = [];
+  try {
+    if (settingsData) {
+      const s = settingsData;
+      // openrouter.keys array
+      if (s.openrouter && Array.isArray(s.openrouter.keys)) {
+        for (const k of s.openrouter.keys) if (k && typeof k === 'string' && k.trim() && !k.includes('•')) fromSettings.push(k.trim());
+      }
+      if (s.providers && s.providers.openrouter && Array.isArray(s.providers.openrouter.keys)) {
+        for (const k of s.providers.openrouter.keys) if (k && typeof k === 'string' && k.trim() && !k.includes('•')) fromSettings.push(k.trim());
+      }
+    }
+  } catch {}
+  // dedupe, env first
+  return [...new Set([...fromEnv, ...fromSettings])];
 }
 
-module.exports = { KeyRing, loadKeys, effectiveKeys, missingSlots };
+function effectiveGroqKeys(settingsData, env = process.env) {
+  const fromEnv = loadGroqKeys(env);
+  const fromSettings = [];
+  try {
+    if (settingsData) {
+      const s = settingsData;
+      if (s.groq && Array.isArray(s.groq.keys)) {
+        for (const k of s.groq.keys) if (k && typeof k === 'string' && k.trim() && !k.includes('•')) fromSettings.push(k.trim());
+      }
+      if (s.providers && s.providers.groq && Array.isArray(s.providers.groq.keys)) {
+        for (const k of s.providers.groq.keys) if (k && typeof k === 'string' && k.trim() && !k.includes('•')) fromSettings.push(k.trim());
+      }
+    }
+  } catch {}
+  return [...new Set([...fromEnv, ...fromSettings])];
+}
+
+function effectiveGeminiKeys(settingsData, env = process.env) {
+  const fromEnv = loadGeminiKeys(env);
+  const fromSettings = [];
+  try {
+    if (settingsData) {
+      const s = settingsData;
+      if (s.gemini && Array.isArray(s.gemini.keys)) {
+        for (const k of s.gemini.keys) if (k && typeof k === 'string' && k.trim() && !k.includes('•')) fromSettings.push(k.trim());
+      }
+      if (s.providers && s.providers.gemini && Array.isArray(s.providers.gemini.keys)) {
+        for (const k of s.providers.gemini.keys) if (k && typeof k === 'string' && k.trim() && !k.includes('•')) fromSettings.push(k.trim());
+      }
+    }
+  } catch {}
+  return [...new Set([...fromEnv, ...fromSettings])];
+}
+
+module.exports = { KeyRing, loadKeys, loadGroqKeys, loadGeminiKeys, effectiveKeys, effectiveGroqKeys: effectiveGroqKeys, effectiveGeminiKeys, missingSlots };

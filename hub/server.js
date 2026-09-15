@@ -33,6 +33,8 @@ const { Grounding } = require('./grounding');
 const { Persona } = require('./persona');
 const { Openers } = require('./openers');
 const { Satellites } = require('./satellites');
+const { TTSRouter } = require('./tts');
+const { AGENT_MAP } = require('./config/agents');
 const diag = require('./diagnostics');
 diag.installDebugCrashHandlers();
 
@@ -129,6 +131,12 @@ const modelRouter = new ModelRouter({ env: process.env, settings, ollama: orches
 const localProc = new LocalProc({ ollama: orchestrator.ollama, audit, log });
 orchestrator.attachBrain({ diagnostician, audit, modelRouter, localProc, grounding });
 diag.record('audit log (tamper-evident)', true, 'HMAC-chained to data/.master.key — /api/audit/verify');
+
+// Multi-agent map: TTS (Orpheus Groq) — zero-dep, browser fallback when no GROQ_API_KEY
+const ttsRouter = new TTSRouter({ log, settings });
+orchestrator.attachTTS(ttsRouter);
+diag.record('tts (Orpheus Groq)', ttsRouter.isConfigured() ? true : 'warn', ttsRouter.isConfigured() ? 'Groq key present · model=' + (process.env.GROQ_TTS_MODEL || 'orpheus') : 'no GROQ_API_KEY — browser speechSynthesis fallback');
+diag.record('multi-agent map', true, 'Host=' + AGENT_MAP.agents.host.model + ' · Sub-agents=' + AGENT_MAP.agents.subAgents.model + '×5 · TTS=' + AGENT_MAP.agents.tts.model + ' · Fallback=' + AGENT_MAP.agents.fallback.model);
 
 /* persistence failures (disk full, perms, corrupt FS) must be LOUD, not silent:
    surface them in the event log + dashboards whenever a debounced save dies. */
@@ -449,8 +457,10 @@ route('GET', /^\/api\/settings$/, async (req, res) => send(res, 200, settings.pu
 /* Systems readout: one honest answer to "what's working, what's blocking what,
    and how to fix it" — consumed by web/systems.html and the Jarvis greeting. */
 route('GET', /^\/api\/status$/, async (req, res) => {
-  const { effectiveKeys } = require('./keyring');
+  const { effectiveKeys, effectiveGroqKeys, effectiveGeminiKeys } = require('./keyring');
   const keys = effectiveKeys(settings.data);
+  const groqKeys = effectiveGroqKeys(settings.data);
+  const geminiKeys = effectiveGeminiKeys(settings.data);
   const keyFails = log.tail(5000).filter((e) => e.type === 'llm.key.fail');
   const lastKeyFail = keyFails[keyFails.length - 1] || null;
   const recentKeyFail = lastKeyFail && Date.now() - lastKeyFail.ts < 3600e3 ? lastKeyFail : null;
@@ -507,15 +517,26 @@ route('GET', /^\/api\/status$/, async (req, res) => {
   if (llmMode === 'cloud' && leanState.active)
     needs.push({ id: 'brain.lean', severity: 'warn', what: `Cloud brain is in lean mode (OpenRouter credit ceiling — ~${leanState.minutesLeft} min left): answers use a reduced prompt meanwhile, and deterministic skills still answer locally.`, fix: 'Add credit at openrouter.ai/settings/credits or set a smaller model in Settings → API keys — full mode resumes on the next successful full-size request.' });
 
+  // Multi-agent + TTS health (non-blocking, best-effort)
+  let agentsHealth = null;
+  let ttsHealth = null;
+  try { agentsHealth = await orchestrator.multiAgentHealth(); } catch {}
+  try { ttsHealth = await ttsRouter.health(); } catch {}
+
   send(res, 200, {
     ok: true, version: VERSION, name: settings.data.assistantName,
     uptime: Math.round(process.uptime()), online: net.online, brain: llmMode, lean: leanState,
     openrouter: { keys: keys.length, model: settings.data.openrouter?.model || '', lastFail: recentKeyFail ? { status: recentKeyFail.status || null, reason: recentKeyFail.reason || null, at: recentKeyFail.ts } : null },
+    groq: { keys: groqKeys.length, model: settings.data.groq?.model || '', voice: settings.data.groq?.voice || 'tara' },
+    gemini: { keys: geminiKeys.length, model: settings.data.gemini?.model || '' },
     ollama: { url: ollamaUrl.replace(/\/\/[^@/]+@/, '//…@'), reachable: ollamaUp, model: (settings.data.security && settings.data.security.model) || '' },
     security: { tokenRequired: !!process.env.MAX_TOKEN, satelliteToken: !!process.env.SATELLITE_TOKEN, alertWebhook: !!process.env.MAX_ALERT_WEBHOOK, lockedUsers, anyVoiceprint: anyVoice },
     satellites: { total: sats.length, online: sats.filter((s) => s.online).length },
     privacy: { transcriptLogging: !!settings.data.privacy?.logTranscripts },
     backup: { lastAt: backupAt },
+    // New: multi-agent map (Jarvis architecture)
+    agents: agentsHealth || { map: AGENT_MAP, routing: AGENT_MAP.routing },
+    tts: ttsHealth || { primary: { configured: ttsRouter.isConfigured(), provider: 'groq', model: process.env.GROQ_TTS_MODEL || 'orpheus' } },
     needs,
   });
 });
@@ -528,26 +549,202 @@ route('POST', /^\/api\/settings$/, async (req, res, m, body) => {
 
 route('GET', /^\/api\/skills$/, async (req, res) => send(res, 200, registry.describe()));
 
-/* OpenRouter keys (v1.0.7): .env-ONLY (OPENROUTER_KEY_1..3). Metadata endpoint
-   only — no secret material (not even masked) and no write path of any kind:
-   keys rotate from .env; edit the file, restart. */
+/* OpenRouter keys (v1.0.7): .env-ONLY originally, now also UI-managed via /api/providers.
+   Metadata endpoint only — no secret material (not even masked) and no write path of any kind
+   for legacy route: keys rotate from .env; edit the file, restart. New route is /api/providers. */
 route('GET', /^\/api\/keys$/, async (req, res) => {
   const { effectiveKeys } = require('./keyring');
   const count = effectiveKeys(settings.data).length;
   const ring = orchestrator.keyStatus();
   send(res, 200, {
-    source: 'env',
+    source: 'env+settings',
     model: settings.data.openrouter?.model || '',
     count,
     slots: ring.map((r) => ({ index: r.index, cooldownSec: r.penalizedForSec })),
-    note: 'Rotating OpenRouter keys live exclusively in .env as OPENROUTER_KEY_1/2/3. Edit the file and restart to change them.',
+    note: 'Rotating OpenRouter keys live in .env as OPENROUTER_KEY_1/2/3 and can also be managed in Settings → LLM Providers. Edit the file or use Settings and restart to change them.',
   });
 });
 const keysGone = (req, res) => send(res, 410, {
-  error: 'OpenRouter keys are managed exclusively in .env (OPENROUTER_KEY_1/2/3) — there is no API path to add, edit, or remove them.',
+  error: 'Legacy /api/keys write is gone — use /api/providers/keys with { provider, keys } instead. OpenRouter keys are managed in .env and Settings → LLM Providers.',
 });
 route('POST', /^\/api\/keys$/, keysGone);
 route('DELETE', /^\/api\/keys$/, keysGone);
+
+/* ---- New: LLM Providers — Groq (5 keys), Gemini (3 keys), OpenRouter (3 keys)
+   Allows the Settings UI to store keys encrypted and list available models live.
+   Keys are stored encrypted in settings store (SecureStore) and also merged with .env.
+   GET /api/providers → counts + masked + model + health
+   POST /api/providers/keys { provider, keys: [..], model? } → saves
+   GET /api/providers/models?provider=openrouter|groq|gemini&key=optionalSingleKey → live model list
+*/
+route('GET', /^\/api\/providers$/, async (req, res) => {
+  const { effectiveKeys, effectiveGroqKeys, effectiveGeminiKeys } = require('./keyring');
+  const orKeys = effectiveKeys(settings.data);
+  const groqKeys = effectiveGroqKeys(settings.data);
+  const geminiKeys = effectiveGeminiKeys(settings.data);
+  const pub = settings.public();
+  send(res, 200, {
+    openrouter: {
+      count: orKeys.length,
+      envCount: require('./keyring').loadKeys().length,
+      settingsCount: (pub.openrouter?.keys?.length || 0) + (pub.providers?.openrouter?.keys?.length || 0),
+      model: pub.openrouter?.model || settings.data.openrouter?.model || '',
+      models: settings.data.openrouter?.models || [],
+      masked: pub.openrouter?.keys || [],
+    },
+    groq: {
+      count: groqKeys.length,
+      envCount: require('./keyring').loadGroqKeys().length,
+      settingsCount: (pub.groq?.keys?.length || 0) + (pub.providers?.groq?.keys?.length || 0),
+      model: pub.groq?.model || settings.data.groq?.model || '',
+      voice: settings.data.groq?.voice || 'tara',
+      models: settings.data.groq?.models || [],
+      masked: pub.groq?.keys || [],
+    },
+    gemini: {
+      count: geminiKeys.length,
+      envCount: require('./keyring').loadGeminiKeys().length,
+      settingsCount: (pub.gemini?.keys?.length || 0) + (pub.providers?.gemini?.keys?.length || 0),
+      model: pub.gemini?.model || settings.data.gemini?.model || '',
+      models: settings.data.gemini?.models || [],
+      masked: pub.gemini?.keys || [],
+    },
+  });
+});
+
+route('POST', /^\/api\/providers\/keys$/, async (req, res, m, body) => {
+  const provider = String(body.provider || '').toLowerCase();
+  if (!['openrouter', 'groq', 'gemini'].includes(provider)) {
+    send(res, 400, { error: 'provider must be openrouter, groq, or gemini' });
+    return;
+  }
+  let keys = body.keys;
+  if (typeof keys === 'string') keys = [keys];
+  if (!Array.isArray(keys)) { send(res, 400, { error: 'keys must be array of strings' }); return; }
+  // sanitize: trim, filter empty, allow masked entries to be ignored (keep existing)
+  const cleanKeys = [];
+  for (let k of keys) {
+    if (typeof k !== 'string') continue;
+    k = k.trim();
+    if (!k) continue;
+    if (k.includes('•')) continue; // masked — keep existing, don't overwrite with masked
+    if (k.length < 8) continue; // too short
+    cleanKeys.push(k);
+  }
+  // If body contains only masked placeholders, we treat as no-op for keys but allow model update
+  const patch = {};
+  if (provider === 'openrouter') {
+    patch.openrouter = {};
+    if (cleanKeys.length) patch.openrouter.keys = cleanKeys;
+    if (body.model) patch.openrouter.model = String(body.model).slice(0, 120);
+    if (body.models && Array.isArray(body.models)) patch.openrouter.models = body.models.slice(0, 200);
+  } else if (provider === 'groq') {
+    patch.groq = {};
+    if (cleanKeys.length) patch.groq.keys = cleanKeys;
+    if (body.model) patch.groq.model = String(body.model).slice(0, 120);
+    if (body.voice) patch.groq.voice = String(body.voice).slice(0, 40);
+    if (body.models && Array.isArray(body.models)) patch.groq.models = body.models.slice(0, 200);
+  } else if (provider === 'gemini') {
+    patch.gemini = {};
+    if (cleanKeys.length) patch.gemini.keys = cleanKeys;
+    if (body.model) patch.gemini.model = String(body.model).slice(0, 120);
+    if (body.models && Array.isArray(body.models)) patch.gemini.models = body.models.slice(0, 200);
+  }
+  // Also mirror into providers for new UI
+  patch.providers = {};
+  patch.providers[provider] = {};
+  if (cleanKeys.length) patch.providers[provider].keys = cleanKeys;
+  if (body.model) patch.providers[provider].model = String(body.model).slice(0, 120);
+
+  settings.patch(patch);
+  log.write('settings.updated', { provider, keys: cleanKeys.length });
+  send(res, 200, { ok: true, provider, saved: cleanKeys.length, public: settings.public() });
+});
+
+route('GET', /^\/api\/providers\/models$/, async (req, res, m, b, query) => {
+  const provider = String(query.get('provider') || '').toLowerCase();
+  const singleKey = String(query.get('key') || '').trim();
+  if (!['openrouter', 'groq', 'gemini'].includes(provider)) {
+    send(res, 400, { error: 'provider must be openrouter, groq, or gemini' });
+    return;
+  }
+  const { effectiveKeys, effectiveGroqKeys, effectiveGeminiKeys } = require('./keyring');
+  let keyToUse = singleKey;
+  if (!keyToUse) {
+    if (provider === 'openrouter') keyToUse = (effectiveKeys(settings.data)[0] || '');
+    else if (provider === 'groq') keyToUse = (effectiveGroqKeys(settings.data)[0] || '');
+    else if (provider === 'gemini') keyToUse = (effectiveGeminiKeys(settings.data)[0] || '');
+  }
+  if (!keyToUse) {
+    send(res, 200, { provider, models: [], error: 'no key configured — add a key in Settings first' });
+    return;
+  }
+  try {
+    let models = [];
+    if (provider === 'openrouter') {
+      const r = await fetch('https://openrouter.ai/api/v1/models', {
+        headers: { Authorization: 'Bearer ' + keyToUse },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!r.ok) throw new Error('OpenRouter HTTP ' + r.status);
+      const j = await r.json();
+      models = (j.data || []).map((m) => m.id).slice(0, 300);
+      // filter to popular / sort
+      models.sort();
+    } else if (provider === 'groq') {
+      const r = await fetch('https://api.groq.com/openai/v1/models', {
+        headers: { Authorization: 'Bearer ' + keyToUse },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!r.ok) {
+        const txt = await r.text().catch(() => '');
+        throw new Error('Groq HTTP ' + r.status + ' ' + txt.slice(0, 120));
+      }
+      const j = await r.json();
+      models = (j.data || []).map((m) => m.id).slice(0, 300);
+      models.sort();
+    } else if (provider === 'gemini') {
+      // Try Google direct first, fallback to OpenRouter filtered
+      let fetched = false;
+      try {
+        const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(keyToUse), {
+          signal: AbortSignal.timeout(8000),
+        });
+        if (r.ok) {
+          const j = await r.json();
+          models = (j.models || []).map((m) => m.name.replace('models/', '')).slice(0, 300);
+          fetched = true;
+        }
+      } catch {}
+      if (!fetched) {
+        // fallback: list via OpenRouter and filter gemini
+        try {
+          const r = await fetch('https://openrouter.ai/api/v1/models', {
+            headers: { Authorization: 'Bearer ' + keyToUse },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (r.ok) {
+            const j = await r.json();
+            models = (j.data || []).map((m) => m.id).filter((id) => /gemini/i.test(id)).slice(0, 200);
+          }
+        } catch {}
+      }
+      if (!models.length) {
+        // hardcoded fallback list when API fails but key exists
+        models = ['google/gemini-2.0-flash-001', 'google/gemini-2.5-pro', 'google/gemini-2.5-flash', 'google/gemini-pro', 'gemini-1.5-pro', 'gemini-1.5-flash'];
+      }
+    }
+    // save discovered models into settings for UI persistence
+    try {
+      const patch = {};
+      patch[provider] = { models };
+      settings.patch(patch);
+    } catch {}
+    send(res, 200, { provider, models, count: models.length });
+  } catch (e) {
+    send(res, 200, { provider, models: [], error: String(e.message).slice(0, 200) });
+  }
+});
 
 /* Vision — privacy-gated. Frames arrive as a data URL, described in memory, dropped. */
 route('GET', /^\/api\/vision\/config$/, async (req, res) => {
@@ -1017,6 +1214,38 @@ route('GET', /^\/api\/audit\/tail$/, (req, res, m, b, query) => {
 });
 route('GET', /^\/api\/audit\/verify$/, (req, res) => send(res, 200, audit.verify()));
 route('GET', /^\/api\/models$/, (req, res) => send(res, 200, modelRouter.status()));
+route('GET', /^\/api\/agents$/, async (req, res) => {
+  try {
+    const h = await orchestrator.multiAgentHealth();
+    send(res, 200, h || { map: AGENT_MAP, note: 'multi-agent not yet booted' });
+  } catch (e) {
+    send(res, 200, { map: AGENT_MAP, error: String(e.message).slice(0, 200) });
+  }
+});
+route('GET', /^\/api\/tts$/, async (req, res) => {
+  try { send(res, 200, await ttsRouter.health()); }
+  catch (e) { send(res, 200, { error: String(e.message).slice(0, 200) }); }
+});
+route('POST', /^\/api\/tts\/speak$/, async (req, res, m, body) => {
+  const text = String(body.text || '').trim();
+  if (!text) { send(res, 400, { error: 'text required' }); return; }
+  try {
+    const out = await ttsRouter.synthesize(text, { voice: body.voice, format: body.format });
+    if (out.fallback) {
+      send(res, 200, { ok: true, fallback: true, provider: 'browser', say: out.say || text });
+      return;
+    }
+    // Return audio as base64 data URL (small clips) or signal fallback
+    if (out.audio) {
+      const b64 = out.audio.toString('base64');
+      send(res, 200, { ok: true, provider: 'groq', model: out.model, voice: out.voice, format: out.format, bytes: out.audio.length, dataUrl: 'data:audio/' + (out.format || 'mp3') + ';base64,' + b64 });
+    } else {
+      send(res, 200, out);
+    }
+  } catch (e) {
+    send(res, 200, { ok: false, fallback: true, error: String(e.message).slice(0, 200), say: text });
+  }
+});
 route('GET', /^\/api\/diagnostics\/issues$/, (req, res) => send(res, 200, { issues: diagnostician.knownIssues() }));
 
 /* ---- adaptive learning layer: inspect, edit, reset — one-tap control (PERSONALIZATION.md) ---- */
