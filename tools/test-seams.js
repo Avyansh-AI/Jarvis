@@ -240,8 +240,16 @@ const VERIFIED_CTX = () => ({ userId: 'U', user: { guest: false, kid: false }, v
 
   /* S16 (BUGS_MASTER B-05 / backlog L-03): the no-auth-LAN metadata posture stays explicitly documented */
   {
-    const sec = fs.readFileSync(__dirname + '/../SECURITY.md', 'utf8');
-    const rdm = fs.readFileSync(__dirname + '/../README.md', 'utf8');
+    const path = require('path');
+    const readFallback = (name) => {
+      const p1 = path.join(__dirname, '..', name);
+      const p2 = path.join(__dirname, '..', 'docs', name);
+      if (fs.existsSync(p1)) return fs.readFileSync(p1, 'utf8');
+      if (fs.existsSync(p2)) return fs.readFileSync(p2, 'utf8');
+      return fs.readFileSync(p1, 'utf8');
+    };
+    const sec = readFallback('SECURITY.md');
+    const rdm = readFallback('README.md');
     ok('S16: SECURITY.md + README.md explicitly state /api/learn and /api/github/status metadata is LAN-visible when MAX_TOKEN is unset',
       /\/api\/learn/.test(sec) && /\/api\/github\/status/.test(sec) && /LAN/.test(sec) && /metadata/i.test(sec) && /MAX_TOKEN/.test(sec) && /\/api\/learn/.test(rdm) && /\/api\/github\/status/.test(rdm));
   }

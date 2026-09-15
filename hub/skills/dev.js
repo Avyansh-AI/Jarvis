@@ -111,7 +111,10 @@ function runSafe(command, ctx, timeoutMs = 5000) {
         try { if (args[0]) safeJoin(args[0]); } catch (e) { resolve({ ok: false, output: e.message }); return; }
       }
     }
-    const child = spawn(bin, args, { cwd: ROOT, env: {}, timeout: timeoutMs });
+    // Use absolute node path for the sandboxed node and preserve PATH for other bins
+    const spawnBin = bin === 'node' ? process.execPath : bin;
+    const spawnEnv = bin === 'node' ? {} : { PATH: process.env.PATH || '/usr/bin:/bin' };
+    const child = spawn(spawnBin, args, { cwd: ROOT, env: spawnEnv, timeout: timeoutMs });
     let out = '';
     const cap = (d) => { if (out.length < 4000) out += d; };
     child.stdout.on('data', cap);

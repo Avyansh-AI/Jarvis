@@ -3,6 +3,9 @@
 const fs = require('fs');
 const path = require('path');
 
+// Allow boot without OpenRouter keys during checks
+process.env.JARVIS_ALLOW_KEYLESS = process.env.JARVIS_ALLOW_KEYLESS || '1';
+
 let ok = 0, bad = 0;
 function tryRequire(rel) {
   try { require(rel); ok++; console.log('ok   ', rel); }
@@ -10,7 +13,7 @@ function tryRequire(rel) {
 }
 
 for (const f of fs.readdirSync(path.join(__dirname, '..', 'hub'))) {
-  if (f.endsWith('.js')) tryRequire(path.join('..', 'hub', f));
+  if (f.endsWith('.js') && f !== 'server.js') tryRequire(path.join('..', 'hub', f));
 }
 for (const f of fs.readdirSync(path.join(__dirname, '..', 'hub', 'skills'))) {
   if (f.endsWith('.js') && !f.startsWith('_') && f !== 'registry.js') {

@@ -25,7 +25,14 @@ const ROOT = path.join(__dirname, '..');
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('ok  ' + n); } else { fail++; console.log('FAIL ' + n); } };
 
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+const read = (rel) => {
+  const full = path.join(ROOT, rel);
+  if (fs.existsSync(full)) return fs.readFileSync(full, 'utf8');
+  // fallback: docs/ location for organized repo
+  const docsAlt = path.join(ROOT, 'docs', path.basename(rel));
+  if (fs.existsSync(docsAlt)) return fs.readFileSync(docsAlt, 'utf8');
+  return fs.readFileSync(full, 'utf8'); // will throw with original path for clarity
+};
 
 /* J1: wake word */
 {

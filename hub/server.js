@@ -70,7 +70,7 @@ if (keyMig.fromSettings || keyMig.migrated) {
       diag.printReport('[boot]');
       process.exit(1);
     }
-    } else {
+  } else {
     diag.record('cloud brain key rotation', true, '3/3 slots present (OPENROUTER_KEY_1..3, .env-only)');
   }
 }
@@ -863,7 +863,7 @@ route('POST', /^\/api\/remote\/unlock$/, async (req, res, m, body) => {
   const want = String(settings.data.features?.remotePass || '');
   if (!want) { send(res, 200, { ok: true, gated: false }); return; }
   const got = String(body.pin || '');
-  const okPin = got.length === want.length && require('crypto').timingSafeEqual(Buffer.from(got.padEnd(64)), Buffer.from(want.padEnd(64)));
+  const okPin = got.length === want.length && crypto.timingSafeEqual(Buffer.from(got.padEnd(64)), Buffer.from(want.padEnd(64)));
   if (!okPin) log.write('security.denied', { user: 'remote', reason: 'remote pin mismatch' });
   send(res, okPin ? 200 : 403, { ok: okPin, gated: true });
 });

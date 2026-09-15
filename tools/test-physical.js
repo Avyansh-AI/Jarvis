@@ -81,7 +81,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const KEYLIKE = /['"`](sk|ghp|gho|xox[bap]|AIza|ya29)[-A-Za-z0-9_]{10,}['"`]/;
   const hits = codeFiles.filter((f) => KEYLIKE.test(fs.readFileSync(path.join(ROOT, f), 'utf8')));
   ok('no real-shaped API keys hardcoded in code', hits.length === 0);
-  const ino = fs.readFileSync(path.join(ROOT, 'satellite/esp32/jarvis_satellite/jarvis_satellite.ino'), 'utf8');
+  const inoPaths = [
+    path.join(ROOT, 'satellite/esp32/jarvis_satellite/jarvis_satellite.ino'),
+    path.join(ROOT, 'satellite/esp32/jarvis_satellite.ino'),
+  ];
+  const inoFile = inoPaths.find((p) => fs.existsSync(p)) || inoPaths[0];
+  const ino = fs.readFileSync(inoFile, 'utf8');
   ok('firmware ships only placeholder creds (YOUR_WIFI…)', /#define WIFI_PASS\s+"YOUR_WIFI_PASSWORD"/.test(ino) && !/YOUR_WIFI"\s*"[^"]*[0-9a-f]{8}/i.test(ino));
 
   // 6. decommission: dry-run keeps data; --yes destroys it
