@@ -138,6 +138,11 @@
     STATES.speaking.line = '';
   }
   let state = 'standby';
+  /* Interruption-aware playback (Brahma-Lite parity): while a LONG utterance
+     (the morning briefing, "catch me up") is being read aloud, the next fresh
+     command interrupts it mid-speech; short answers always finish (self-echo
+     and cut-off-reply risk not worth it). Set from res.long by handleResponse. */
+  let interruptibleSpeech = false;
   let alertActive = false;
   let errorTimer = null;
 
@@ -239,6 +244,7 @@
   let replyWatchdog = null;
   async function sendUtterance(text, extra = {}) {
     if (!text.trim()) return;
+    MAX.stopSpeaking(); // a new command always interrupts whatever is still playing
     setState('thinking');
     if (wsOpen) {
       try { ws.send(JSON.stringify({ type: 'utterance', text, ...extra })); }
@@ -280,8 +286,8 @@
     addBubble('max', res.say, res.cards);
     speak(stripCodeForSpeech(res.say), {
       pacing: res.pacing,
-      onstart: () => setState('speaking'),
-      onend: () => { if (state === 'speaking') setState('standby', 'All set. Here if you need me.'); },
+      onstart: () => { setState('speaking'); interruptibleSpeech = res.long === true; },
+      onend: () => { interruptibleSpeech = false; if (state === 'speaking') setState('standby', 'All set. Here if you need me.'); },
     });
     if (!('speechSynthesis' in window) || MAX.LS.get('textOnly', false)) {
       setState('standby', res.say);
@@ -671,8 +677,13 @@
       wakeRec.onresult = (e) => {
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const said = e.results[i][0].transcript.toLowerCase();
-          if (WakeWord.match(said).wake && state === 'standby') {
+          // Barge-in: a wake word interrupts a LONG speaking utterance (the
+          // briefing) mid-speech — Brahma-Lite parity. 'alert' (SOS) is
+          // deliberately never interrupted by voice; short replies never
+          // arm the interrupt window (self-echo guard).
+          if (WakeWord.match(said).wake && (state === 'standby' || (state === 'speaking' && interruptibleSpeech))) {
             MAX.notify('Jarvis', 'Wake word heard');
+            if (state === 'speaking') { MAX.stopSpeaking(); setState('standby'); } // stop TTS even if the mic path then fails
             transcriptLine.textContent = '';
             try { wakeRec.stop(); } catch {}
             startListening();

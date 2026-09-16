@@ -25,6 +25,8 @@
  * 17.  create: office depth — stub-interpreter driven parity for .docx/.pptx
  *      (python3/python/py detection, no-python, no-lib, crash, empty-gen,
  *      native) + offline voice intents + Settings capability line
+ * 18.  interruption-aware briefing playback (long:true flag + barge-in window
+ *      on the web client + Remote stop control)
  * 15. every new skill registered; theme still cream/coral; no LLM-provider
  *     strings crept in (Gemini etc. must NOT appear in hub code)
  */
@@ -319,6 +321,29 @@ const ok = (n, c) => { if (c) { pass++; console.log('ok  ' + n); } else { fail++
     const regSrc = fs.readFileSync(path.join(ROOT, 'hub', 'skills', 'registry.js'), 'utf8');
     ok('registry: describe() calls only SYNC status lines — async skill status (github) is never invoked or surfaced',
       ghRow && !('status' in ghRow) && /AsyncFunction/.test(regSrc));
+  }
+
+  /* ---- 18. interruption-aware briefing playback (v1.0.11, Brahma-Lite
+     parity): the hub flags long utterances with long:true; the web client
+     arms a barge-in window ONLY while such an utterance speaks. ---- */
+  {
+    const b = await api('/api/utterance', { user: 'BriefX', text: 'give me my daily briefing' });
+    ok('briefing: hub response carries the long-form flag through _runHit/_finish/ws-shape (long:true)',
+      typeof b.say === 'string' && b.long === true && !b.error);
+    const idx = fs.readFileSync(path.join(ROOT, 'web', 'index.html'), 'utf8');
+    ok('briefing barge-in: wake gate arms ONLY on speaking+long (short replies never arm; alert never interrupts)',
+      /state === 'speaking' && interruptibleSpeech/.test(idx) && /interruptibleSpeech = res\.long === true/.test(idx) &&
+      !/state === 'alert' && interruptibleSpeech/.test(idx));
+    ok('briefing barge-in: hearing the wake word stops the briefing TTS BEFORE the mic path (mic failure can never leave it talking)',
+      /if \(state === 'speaking'\) \{ MAX\.stopSpeaking\(\); setState\('standby'\); \}.*startListening/s.test(idx));
+    ok('briefing barge-in: any new command sent (text box included) cancels current speech first',
+      (() => { const s = idx.slice(idx.indexOf('async function sendUtterance'));
+        return s.indexOf('MAX.stopSpeaking()') !== -1 && s.indexOf('MAX.stopSpeaking()') < s.indexOf("setState('thinking')"); })());
+    const dash = fs.readFileSync(path.join(ROOT, 'web', 'dashboard.html'), 'utf8');
+    ok('briefing barge-in: Jarvis Remote briefing button turns into a live stop control while speaking',
+      /if \(briefSpeaking\) \{ MAX\.stopSpeaking\(\); return; \}/.test(dash) && /MAX\.speak\(res\.say, \{ onend: done \}\)/.test(dash));
+    ok('briefing barge-in: manual ring stop during speech stays intact (tap interrupts ANY utterance, SOS untouched)',
+      /else if \(state === 'speaking'\) \{ MAX\.stopSpeaking\(\); setState\('standby'\); \}/.test(idx) && /state === 'alert'\) cancelSOS/.test(idx));
   }
 
   /* ---- 15. registry + provider hygiene ---- */
