@@ -19,6 +19,12 @@
  * 14. task progress concurrent with an active voice session (workspace regression)
  * 14b. B-11: reminder intent parses time-clause-first phrasing in ONE turn
  *         + B-12: clear/delete imperatives are not shadowed by the list catch-all
+ * 16.  Windows quiet launcher (start-jarvis-quiet.vbs + jarvis-tray.ps1):
+ *      same hub/server.js entry, hidden window, no secrets, PID-scoped stop,
+ *      and the /api/health probe shape it relies on
+ * 17.  create: office depth — stub-interpreter driven parity for .docx/.pptx
+ *      (python3/python/py detection, no-python, no-lib, crash, empty-gen,
+ *      native) + offline voice intents + Settings capability line
  * 15. every new skill registered; theme still cream/coral; no LLM-provider
  *     strings crept in (Gemini etc. must NOT appear in hub code)
  */
@@ -192,6 +198,127 @@ const ok = (n, c) => { if (c) { pass++; console.log('ok  ' + n); } else { fail++
     const lr2 = await api('/api/utterance', { user: 'RemB11', text: 'list my reminders' });
     ok('B-12: list after clear is honestly empty (imperative actually executed)',
       /don.t have any reminders/i.test(lr2.say || ''));
+  }
+
+  /* ---- 16. Windows quiet launcher (v1.0.11, Brahma-Lite parity):
+     same server entry, hidden window, no config surface, no credentials. ---- */
+  {
+    const vbs = fs.readFileSync(path.join(ROOT, 'scripts', 'windows', 'start-jarvis-quiet.vbs'), 'utf8');
+    const ps1 = fs.readFileSync(path.join(ROOT, 'scripts', 'windows', 'jarvis-tray.ps1'), 'utf8');
+    ok('launcher: VBS exists, starts exactly the `npm start` entry (hub\\server.js) — no bespoke server',
+      /WScript\.Shell/.test(vbs) && /nodeCmd.*hub\\server\.js|"" hub\\server\.js/s.test(vbs) && !/server[-_ ]?(lite|quiet|alt)/i.test(vbs));
+    ok('launcher: VBS runs hidden (window style 0) and waits for nothing (double-click returns)',
+      /", 0, False/.test(vbs) && /", 0, True/.test(vbs));
+    ok('launcher: VBS probes only 127.0.0.1 /api/health; downloads no remote code; carries no secret patterns',
+      /http:\/\/127\.0\.0\.1:/.test(vbs) && vbs.indexOf('http://') === vbs.lastIndexOf('http://127.0.0.1')
+      && !/WinHttp|XMLHTTP|bit\.ly|curl |wget |Invoke-Expression/i.test(vbs)
+      && !/Bearer|token\s*=|api[_-]?key|password/i.test(vbs));
+    ok('launcher: tray starts quiet hub via Start-Process -WindowStyle Hidden and reports NotifyIcon tray',
+      /Start-Process node -ArgumentList 'hub\/server\.js'/.test(ps1) && /-WindowStyle Hidden/.test(ps1) && /NotifyIcon/.test(ps1));
+    ok('launcher: tray stop is PID-scoped to the process it launched (never broad node kills / taskkill /IM)',
+      /Stop-Process -Id \$script:Hub\.Id/.test(ps1) && !/taskkill|Get-Process node(?!js)\s*\|/i.test(ps1));
+    ok('launcher: tray talks only to its own localhost hub; no remote endpoints, no credentials',
+      (ps1.match(/http:\/\/[^\s"']+|"\$Base/g) || []).every((u) => /127\.0\.0\.1|\$Base/.test(u))
+      && !/api[_-]?key|Bearer|password|\.master/i.test(ps1));
+    const h = await api('/api/health');
+    ok('launcher: /api/health shape the probe/menu depend on (ok/version/skills/satellites) is real',
+      h.ok === true && typeof h.version === 'string' && typeof h.skills === 'number' && typeof h.satellites === 'number');
+  }
+
+  /* ---- 17. create: office-generation depth & honest degradation (v1.0.11,
+     Brahma-Lite parity). A stub interpreter under MAX_PY_CREATE drives every
+     branch deterministically: no python at all, python without the libs, a
+     clean-but-empty generator, a crashing generator, and the native success
+     path. Every branch must END WITH A FILE plus a note naming what to do. ---- */
+  {
+    const create = require('../hub/skills/create.js');
+    const docTool = create.tools.find((t) => t.name === 'create_document');
+    const deckTool = create.tools.find((t) => t.name === 'create_deck');
+    ok('create: interpreter detection spans python3/python/py and honors the MAX_PY_CREATE hook',
+      /python3|python|py/.test(create._internals.pyBin.toString() + String(require('fs').readFileSync(path.join(ROOT, 'hub', 'skills', 'create.js'), 'utf8'))) && /MAX_PY_CREATE/.test(create._internals.pyBin.toString()));
+    const rNoPy = await docTool.run({ title: 'NoPythonDoc', paragraphs: ['body'] });
+    ok('create: docx tool degrades to a real Markdown file (no python needed for the fallback)',
+      rNoPy.ok === true && /\.(docx|md)$/.test(rNoPy.file) && fs.existsSync(path.join(process.env.MAX_FILES_ROOT, rNoPy.file)));
+
+    if (process.platform !== 'win32') {
+      const fakeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'max-fakepy-'));
+      const fake = path.join(fakeDir, 'fakepy');
+      fs.writeFileSync(fake, [
+        '#!/usr/bin/env node',
+        'const a = process.argv.slice(2); const code = a[1] || "";',
+        'if (code === "import sys") process.exit(0);',
+        'let m = code.match(/^import (\\w+)/);',
+        'if (m) { const mods = (process.env.FAKEPY_MODS || "").split(","); process.exit(mods.includes(m[1]) ? 0 : 1); }',
+        'if (process.env.FAKEPY_GEN === "write") { require("fs").writeFileSync(a[3], "FAKE-OFFICE-BYTES"); console.log("ok"); process.exit(0); }',
+        'if (process.env.FAKEPY_GEN === "empty") process.exit(0);',
+        'console.error("Traceback (most recent call last):\\nKeyError: slide_layout"); process.exit(1);',
+      ].join('\n'));
+      fs.chmodSync(fake, 0o755);
+      const withEnv = async (vars, fn) => {
+        const saved = {};
+        for (const [k, v] of Object.entries(vars)) { saved[k] = process.env[k]; if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+        try { return await fn(); } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
+      };
+      // (a) no usable interpreter at all → "install Python" note + fallback file
+      await withEnv({ MAX_PY_CREATE: path.join(fakeDir, 'does-not-exist') }, async () => {
+        const r = await docTool.run({ title: 'PyMissing', paragraphs: ['body'] });
+        const d = await deckTool.run({ title: 'PyMissing Deck', slides: [{ title: 't', bullets: ['b'] }] });
+        ok('create: no python → fallback file + note that names installing Python 3 (never silence)',
+          r.ok && /\.md$/.test(r.file) && /Python 3 not found/i.test(r.note) &&
+          d.ok && d.format === 'html' && /Python 3 not found/i.test(d.note));
+      });
+      // (b) python present, libs absent → pip hints
+      await withEnv({ MAX_PY_CREATE: fake, FAKEPY_MODS: '' }, async () => {
+        const r = await docTool.run({ title: 'LibMissing', paragraphs: ['body'] });
+        const d = await deckTool.run({ title: 'LibMissing Deck', slides: [{ title: 't', bullets: ['b'] }] });
+        ok('create: python without libs → exact pip install hint per format',
+          /pip install python-docx/.test(r.note) && /\.md$/.test(r.file) && /pip install python-pptx/.test(d.note));
+      });
+      // (c) native path taken when libs exist (generator drives the whole render)
+      await withEnv({ MAX_PY_CREATE: fake, FAKEPY_MODS: 'docx,pptx', FAKEPY_GEN: 'write' }, async () => {
+        const r = await docTool.run({ title: 'NativeDoc', paragraphs: ['body'] });
+        const d = await deckTool.run({ title: 'Native Deck', slides: [{ title: 't', bullets: ['b'] }] });
+        ok('create: python-docx/pptx present → real .docx/.pptx files returned with bytes',
+          r.ok && /\.docx$/.test(r.file) && r.format === 'docx' && r.bytes > 0 &&
+          d.ok && /\.pptx$/.test(d.file) && d.format === 'pptx' && !d.note);
+      });
+      // (d) generator CRASHES → the crash is named AND the fallback still ships
+      await withEnv({ MAX_PY_CREATE: fake, FAKEPY_MODS: 'docx,pptx' }, async () => {
+        const r = await docTool.run({ title: 'CrashDoc', paragraphs: ['body'] });
+        ok('create: generator crash → last stderr line surfaced + Markdown still produced (no silent failure)',
+          r.ok && /failed while creating/i.test(r.note) && /KeyError/.test(r.note) && /fallback file/i.test(r.note) && fs.existsSync(path.join(process.env.MAX_FILES_ROOT, r.file)));
+      });
+      // (e) clean exit that produced nothing → honest "produced no file" detail
+      await withEnv({ MAX_PY_CREATE: fake, FAKEPY_MODS: 'docx', FAKEPY_GEN: 'empty' }, async () => {
+        const r = await docTool.run({ title: 'EmptyDoc', paragraphs: ['body'] });
+        ok('create: generator exits clean but writes nothing → note says exactly that',
+          r.ok && /produced no file/i.test(r.note) && fs.existsSync(path.join(process.env.MAX_FILES_ROOT, r.file)));
+      });
+      // (f) the native-capable branch also reaches the voice intents
+      await withEnv({ MAX_PY_CREATE: fake, FAKEPY_MODS: 'docx,pptx', FAKEPY_GEN: 'write' }, async () => {
+        const v1 = await api('/api/utterance', { user: 'CreateX', text: 'make a word document about coffee brewing' });
+        const v2 = await api('/api/utterance', { user: 'CreateX', text: 'make a presentation about quadcopter drones' });
+        ok('create: "make a word document about X" / "…presentation about X" answered offline by intents (no LLM)',
+          /ready/i.test(v1.say || '') && /Word document/i.test(v1.say || '') && /\.docx$/.test((v1.data && v1.data.file) || '') &&
+          /ready/i.test(v2.say || '') && /PowerPoint deck/i.test(v2.say || '') && (v2.data && v2.data.format === 'pptx'));
+        ok('create: deck intent writes the artifact into the jailed files folder',
+          v2.data && fs.existsSync(path.join(process.env.MAX_FILES_ROOT, v2.data.file || '')));
+      });
+    } else {
+      ok('create: python-stub branch tests skipped on win32 (shebang stubs are POSIX)', true);
+    }
+    /* Settings surface: capability status in /api/skills + rendered in settings.html */
+    const sk = (await api('/api/skills')).find((s) => s.name === 'create');
+    const setSrc = fs.readFileSync(path.join(ROOT, 'web', 'settings.html'), 'utf8');
+    ok('create: live capability line surfaced in Settings → Skills (status on /api/skills, escaped render)',
+      typeof sk.status === 'string' && /Word|PowerPoint/i.test(sk.status) && /esc\(s\.status\)/.test(setSrc));
+    // the describe() trap, pinned: github exposes an ASYNC status() that hits
+    // the live API for the confirm flow — the read-only Settings/health surface
+    // must never call it (introduced alongside create.status, v1.0.11)
+    const ghRow = (await api('/api/skills')).find((s) => s.name === 'github');
+    const regSrc = fs.readFileSync(path.join(ROOT, 'hub', 'skills', 'registry.js'), 'utf8');
+    ok('registry: describe() calls only SYNC status lines — async skill status (github) is never invoked or surfaced',
+      ghRow && !('status' in ghRow) && /AsyncFunction/.test(regSrc));
   }
 
   /* ---- 15. registry + provider hygiene ---- */

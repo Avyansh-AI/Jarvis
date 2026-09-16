@@ -263,7 +263,8 @@
     skills.forEach((s) => {
       const li = document.createElement('li');
       li.style.display = 'flex'; li.style.justifyContent = 'space-between'; li.style.alignItems = 'center';
-      li.innerHTML = `<span>${s.label}${s.sensitive ? ' 🔒' : ''} <span class="desc">v${s.version}</span></span>`;
+      const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      li.innerHTML = `<span>${esc(s.label)}${s.sensitive ? ' 🔒' : ''} <span class="desc">v${esc(s.version)}</span>${s.status ? `<br><span class="desc">${esc(s.status)}</span>` : ''}</span>`;
       const sw = document.createElement('span');
       sw.className = 'switch';
       sw.innerHTML = `<input type="checkbox" ${s.enabled ? 'checked' : ''} aria-label="Enable ${s.label}"><span class="track"></span>`;
