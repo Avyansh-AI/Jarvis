@@ -111,7 +111,12 @@ function runSafe(command, ctx, timeoutMs = 5000) {
         try { if (args[0]) safeJoin(args[0]); } catch (e) { resolve({ ok: false, output: e.message }); return; }
       }
     }
-    const child = spawn(bin, args, { cwd: ROOT, env: {}, timeout: timeoutMs });
+    /* 'node' must resolve WITHOUT PATH (env is deliberately empty). PATH-based
+       lookup only ever hits /usr/bin|/bin (apt installs); machines with node in
+       /usr/local/bin or under nvm would fail with a bogus "isn't installed".
+       process.execPath is the exact running binary — deterministic and immune
+       to PATH hijacking. All sandbox flags below are unchanged. */
+    const child = spawn(bin === 'node' ? process.execPath : bin, args, { cwd: ROOT, env: {}, timeout: timeoutMs });
     let out = '';
     const cap = (d) => { if (out.length < 4000) out += d; };
     child.stdout.on('data', cap);

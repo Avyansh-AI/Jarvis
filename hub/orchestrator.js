@@ -16,7 +16,7 @@
  */
 const { http } = require('./net');
 const { scrubText } = require('./diagnose'); // pure function — never let a secret ride an error line
-const { KeyRing, loadKeys, effectiveKeys } = require('./keyring');
+const { KeyRing, loadKeys, loadKeysFor, effectiveKeys, PROVIDERS } = require('./keyring');
 const { Ollama, DEFAULT_MODEL, DEFAULT_URL } = require('./ollama');
 
 const NEGATIVE = /\b(stupid|useless|broken|hate this|damn|awful|terrible|not working)\b/i;
@@ -239,14 +239,28 @@ class Orchestrator {
   attachScheduler(scheduler) { this.deps_scheduler = scheduler; }
 
   /** Key ring w/ signature-based rebuild whenever the effective key list changes. */
-  _ring() {
-    const eff = effectiveKeys(this.settings.data);
-    const sig = eff.join('|');
-    if (!this.__ring || this.__ringSig !== sig) {
-      this.__ring = new KeyRing(eff);
-      this.__ringSig = sig;
+  _ring(provider = 'openrouter') {
+    if (provider === 'openrouter') {
+      const eff = effectiveKeys(this.settings.data);
+      const sig = eff.join('|');
+      if (!this.__ring || this.__ringSig !== sig) {
+        this.__ring = new KeyRing(eff);
+        this.__ringSig = sig;
+      }
+      return this.__ring;
     }
-    return this.__ring;
+    // v1.1.0: overflow providers get their own rotation rings — same cooldown policy,
+    // same .env-only source (GROQ_KEY_n / GEMINI_KEY_n), same index-only logging.
+    const prefix = PROVIDERS[provider];
+    const eff = prefix ? loadKeysFor(prefix, process.env) : [];
+    const sig = provider + '|' + eff.join('|');
+    this.__rings = this.__rings || {};
+    this.__ringsSigs = this.__ringsSigs || {}; // per provider — a gemini call must never rebuild (and cool-wipe) the groq ring
+    if (!this.__rings[provider] || this.__ringsSigs[provider] !== sig) {
+      this.__rings[provider] = new KeyRing(eff);
+      this.__ringsSigs[provider] = sig;
+    }
+    return this.__rings[provider];
   }
 
   keyStatus() { return this._ring().status(); }
@@ -773,6 +787,9 @@ class Orchestrator {
     return [
       `You are ${name}, a personal AI in the spirit of an unflappable second-in-command: precise, confident, understated, dry-witted when it lands. Tone: ${toneDesc}.`,
       personaBlock,
+      // v1.1.0 multi-brain discipline — the ensemble is invisible; the illusion is one continuous Jarvis.
+      "You are the Host of a small ensemble: silent sub-agents may execute narrow delegated tasks for you, and an identical fallback model can carry this conversation when your primary rung is unavailable. Present finished results as your own; never name or narrate who did what, never reference, apologize for, or explain a provider switch. If asked what you run on, a dry line like 'a small ensemble of models working in concert' is the full answer — never disclose model names, providers, key counts or account details, except to the owner debugging the system directly.",
+      "When delegating via the delegate_task tool: hand it ONE well-defined mechanical task (parse, summarize, compute, extract); integrate its output yourself. If it is unavailable, just do the work.",
       'You speak out loud, so keep spoken parts short and natural (1–3 sentences), no link dumps.',
       'The user also sees your reply in a chat view: if an answer contains code, wrap it in fenced blocks with the language tag (```python …```) and keep surrounding prose minimal.',
       'When an action is needed, call the matching tool instead of describing it. If a tool result includes "say", relay it naturally.',
@@ -784,11 +801,28 @@ class Orchestrator {
     ].filter(Boolean).join('\n');
   }
 
-  /** One chat-completion call with key rotation across the ring (429/5xx → soft-skip, 401/402/403 → hard-skip). */
-  async _chat(base, body) {
-    const ring = this._ring();
+  /** One chat-completion call with key rotation across the provider's ring
+      (429/5xx → soft-skip, 401/402/403 → hard-skip). v1.1.0: base+ring follow the rung's
+      provider — all three sanctioned bases speak the OpenAI chat shape. */
+  static baseFor(provider) {
+    if (provider === 'groq') return (process.env.GROQ_BASE || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
+    if (provider === 'gemini') return (process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/$/, '');
+    return (process.env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+  }
+
+  /** Which provider owns this rung id (bare or prefixed); default = openrouter (single-model legacy path). */
+  _providerOf(modelId) {
+    if (!this.router || !modelId) return 'openrouter';
+    try {
+      const rung = this.router.ladder().find((r) => r.id === modelId);
+      return (rung && rung.provider) || 'openrouter';
+    } catch { return 'openrouter'; }
+  }
+
+  async _chat(base, body, provider = 'openrouter') {
+    const ring = this._ring(provider);
     const attempts = Math.max(1, ring.size);
-    let lastErr = new Error('no OpenRouter keys configured');
+    let lastErr = new Error('no ' + provider + ' keys configured');
     for (let attempt = 0; attempt < attempts; attempt++) {
       const pick = ring.next();
       if (!pick) break;
@@ -799,8 +833,10 @@ class Orchestrator {
           headers: {
             'content-type': 'application/json',
             authorization: 'Bearer ' + pick.key,
-            'http-referer': process.env.OPENROUTER_REFERER || 'http://localhost:8080',
-            'x-title': process.env.OPENROUTER_TITLE || 'Jarvis',
+            ...(provider === 'openrouter' ? { // ranking metadata is an OpenRouter-only courtesy
+              'http-referer': process.env.OPENROUTER_REFERER || 'http://localhost:8080',
+              'x-title': process.env.OPENROUTER_TITLE || 'Jarvis',
+            } : {}),
           },
           body: JSON.stringify(body),
         }, 45000);
@@ -812,7 +848,7 @@ class Orchestrator {
       }
       if (res.ok) { ring.ok(pick.index); return res; }
       const status = res.status;
-      lastErr = new Error('OpenRouter HTTP ' + status);
+      lastErr = new Error(provider + ' HTTP ' + status);
       lastErr.status = status;
       if (status === 401 || status === 402 || status === 403) {
         if (status === 402) {
@@ -947,7 +983,8 @@ class Orchestrator {
   }
 
   async _llmProfile(text, uid, ctx, profile, creditHint) {
-    const base = (process.env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+    const provider = profile === 'lean' ? 'openrouter' : this._providerOf(ctx.model);
+    const base = Orchestrator.baseFor(provider);
     const lean = profile === 'lean';
     const tools = lean ? [] : this.registry.toolDefs().map((t) => ({
       type: 'function',
@@ -988,10 +1025,10 @@ class Orchestrator {
     let usedSkill = null;
     const loop = { sawUntrusted: false, usedSkill: null, pending: null }; // trust state for this brain loop
     for (let round = 0; round < 4; round++) {
-      const res = await this._chat(base, body);
+      const res = await this._chat(base, body, provider);
       const data = await res.json();
       const msg = data.choices && data.choices[0] && data.choices[0].message;
-      if (!msg) throw new Error('OpenRouter returned no message');
+      if (!msg) throw new Error('the cloud brain returned no message');
       messages.push({ role: 'assistant', content: msg.content ?? null, tool_calls: msg.tool_calls });
 
       if (lean || !msg.tool_calls || !msg.tool_calls.length) {

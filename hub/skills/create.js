@@ -3,6 +3,10 @@
  *  Node writer), Word docs (python-docx when present — optional OS package,
  *  NOT an API key), slide decks (python-pptx when present, otherwise a
  *  self-contained HTML deck), and simple static websites (served at /sites/).
+ *  Interpreter detection spans python3/python/py so the same story is true on
+ *  Windows as on Linux; every degraded path still delivers a file AND says
+ *  exactly what to install — never a silent failure. `status()` reports the
+ *  live capability set in Settings → Skills.
  *  All output lands in the jailed files folder (see desktop skill). No paid
  *  API of any kind. The LLM brain supplies the words; this module renders. */
 const fs = require('fs');
@@ -55,12 +59,53 @@ function makePdf(title, paragraphs) {
   return Buffer.from(out, 'latin1');
 }
 
-/* ---------- optional python docx/pptx (detected at call time) ---------- */
-function pythonHas(mod) {
-  const r = spawnSync('python3', ['-c', `import ${mod}`], { timeout: 8000 });
-  return r.status === 0;
+/* ---------- optional python docx/pptx (detected at call time) ----------
+ * Interpreter discovery, desktop-assistant full parity: on Windows `python3`
+ * may be absent (python.exe / the `py -3` launcher are the norm) or, worse, a
+ * Microsoft-Store alias STUB that just prints a message. Candidates are
+ * therefore validated by actually running `import sys` — a stub can't hijack
+ * generation. MAX_PY_CREATE=<path> forces an exact interpreter (documented
+ * test/dev hook, same spirit as MAX_NET_PROBE_URL).
+ * Fallback contract — a user never meets a silent failure: no interpreter or
+ * no library still produces a usable artifact (Markdown / HTML deck) plus one
+ * honest line naming EXACTLY what to install; a crash mid-generation surfaces
+ * the last error line too, never just a shrug. */
+const PY_CANDIDATES = [['python3', []], ['python', []], ['py', ['-3']]];
+const PY_TTL = 30000; // cache detection 30 s for the Settings/health surface; forced hooks never cache
+let _pyCache = { at: 0, bin: null };
+const _hasCache = new Map();
+
+function pyBin() {
+  const forced = process.env.MAX_PY_CREATE;
+  if (forced) {
+    try { return spawnSync(forced, ['-c', 'import sys'], { timeout: 8000 }).status === 0 ? [forced, []] : null; }
+    catch { return null; }
+  }
+  if (Date.now() - _pyCache.at < PY_TTL) return _pyCache.bin;
+  _pyCache.at = Date.now(); _pyCache.bin = null;
+  for (const [cmd, pre] of PY_CANDIDATES) {
+    let r; try { r = spawnSync(cmd, [...pre, '-c', 'import sys'], { timeout: 8000 }); } catch { continue; }
+    if (r && r.status === 0) { _pyCache.bin = [cmd, pre]; break; }
+  }
+  return _pyCache.bin;
 }
-function pythonMake(kind, spec, outPath) {
+function pyHas(mod) {
+  const bin = pyBin();
+  if (!bin) return false;
+  const forced = !!process.env.MAX_PY_CREATE;
+  if (!forced) { const hit = _hasCache.get(mod); if (hit && Date.now() - hit.at < PY_TTL) return hit.v; }
+  let r; try { r = spawnSync(bin[0], [...bin[1], '-c', `import ${mod}`], { timeout: 8000 }); } catch { r = null; }
+  const v = !!(r && r.status === 0);
+  if (!forced) _hasCache.set(mod, { at: Date.now(), v });
+  return v;
+}
+const pythonMake = (kind, spec, outPath) => pyRun(kind, spec, outPath).ok; // kept: existing _internals consumers
+
+function pyRun(kind, spec, outPath) {
+  const lib = kind === 'docx' ? 'docx' : 'pptx';
+  const bin = pyBin();
+  if (!bin) return { ok: false, why: 'no-python', lib };
+  if (!pyHas(lib)) return { ok: false, why: 'no-lib', lib };
   const script = `
 import sys, json
 spec = json.loads(sys.argv[1])
@@ -83,8 +128,29 @@ else:
             (tf.paragraphs[0] if i == 0 else tf.add_paragraph()).text = b
     prs.save(sys.argv[2])
 print('ok')`;
-  const r = spawnSync('python3', ['-c', script, JSON.stringify(spec), outPath], { timeout: 20000 });
-  return r.status === 0 && fs.existsSync(outPath);
+  let r; try { r = spawnSync(bin[0], [...bin[1], '-c', script, JSON.stringify(spec), outPath], { timeout: 20000 }); } catch { r = null; }
+  if (!r || r.status !== 0) {
+    const last = String((r && r.stderr) || '').trim().split('\n').filter(Boolean).pop() || '';
+    return { ok: false, why: 'gen-failed', lib, detail: last.slice(0, 160) };
+  }
+  if (!fs.existsSync(outPath) || fs.statSync(outPath).size === 0) return { ok: false, why: 'gen-failed', lib, detail: 'interpreter exited cleanly but produced no file' };
+  return { ok: true, lib };
+}
+function pyNote(res) {
+  if (res.why === 'no-python') return 'Python 3 not found (tried python3/python/py) — install it, then `pip install python-docx python-pptx`, for real Word/PowerPoint files. Made a fallback file instead — content is complete, format differs.';
+  if (res.why === 'no-lib') return `python-${res.lib} not installed — \`pip install python-${res.lib}\` enables the real ${res.lib === 'docx' ? 'Word' : 'PowerPoint'} file. Made a fallback file instead — content is complete, format differs.`;
+  return `python-${res.lib} failed while creating the file${res.detail ? ': ' + res.detail : ''}. Made a fallback file instead — content is complete, format differs.`;
+}
+/* one-liner for Settings → Skills (capability surface; cached, never throws) */
+function statusLine() {
+  try {
+    if (!pyBin()) return 'Word/PPTX: portable fallback — no Python 3 found (PDF is built-in)';
+    const d = pyHas('docx'); const p = pyHas('pptx');
+    if (d && p) return 'Word + PowerPoint: native (python-docx, python-pptx)';
+    if (d) return 'Word: native · PowerPoint: fallback (pip install python-pptx)';
+    if (p) return 'PowerPoint: native · Word: fallback (pip install python-docx)';
+    return 'Word/PPTX: fallback (pip install python-docx python-pptx)';
+  } catch { return null; }
 }
 
 /* ---------- websites ---------- */
@@ -118,11 +184,33 @@ ${body}
 
 const paras = (v) => (Array.isArray(v) ? v : [v]).map((x) => String(x)).slice(0, 200);
 
+/* one render path per artifact — shared by the LLM tools and the voice
+   intents, so both tell the same truth about what was made and why. */
+function _makeDoc(title, paragraphs) {
+  const spec = { title: title || 'Untitled', paragraphs };
+  const file = path.join(ROOT_DIR, slug(title) + '.docx');
+  const made = pyRun('docx', spec, file);
+  if (made.ok) return { ok: true, file: path.basename(file), bytes: fs.statSync(file).size, format: 'docx' };
+  const md = path.join(ROOT_DIR, slug(title) + '.md');
+  fs.writeFileSync(md, '# ' + spec.title + '\n\n' + spec.paragraphs.join('\n\n') + '\n', 'utf8');
+  return { ok: true, file: path.basename(md), format: 'markdown', note: pyNote(made) };
+}
+function _makeDeck(title, slides) {
+  const spec = { title: title || 'Untitled deck', slides };
+  const file = path.join(ROOT_DIR, slug(title) + '.pptx');
+  const made = pyRun('pptx', spec, file);
+  if (made.ok) return { ok: true, file: path.basename(file), bytes: fs.statSync(file).size, format: 'pptx' };
+  const out = makeHtmlDeck(spec.title, spec.slides);
+  return { ok: true, ...out, format: 'html', note: pyNote(made) };
+}
+
 module.exports = {
   name: 'create',
   label: 'Create Files',
   description: 'Make PDFs, Word docs, slide decks and simple websites on request.',
-  _internals: { makePdf, makeSite, pythonHas, wrapText },
+  status: statusLine, // surfaced in Settings → Skills: which Office backends are live right now
+  _internals: { makePdf, makeSite, pythonHas: pyHas, wrapText, pyBin, pyRun, pyNote },
+  _makeDoc, _makeDeck,
   tools: [
     {
       name: 'create_pdf', sideEffect: 'write',
@@ -136,36 +224,19 @@ module.exports = {
     },
     {
       name: 'create_document', sideEffect: 'write',
-      description: 'Render a Word .docx (needs the optional python-docx OS package; falls back to Markdown).',
+      description: 'Render a Word .docx when the optional python-docx OS package is present, otherwise a clean Markdown file — always a real file, with an honest one-line note about what was installed or missed.',
       input_schema: { type: 'object', properties: { title: { type: 'string' }, paragraphs: { type: 'array', items: { type: 'string' } } }, required: ['title', 'paragraphs'] },
-      run: async ({ title, paragraphs }) => {
-        const spec = { title: String(title).slice(0, 120), paragraphs: paras(paragraphs) };
-        if (pythonHas('docx')) {
-          const file = path.join(ROOT_DIR, slug(title) + '.docx');
-          if (pythonMake('docx', spec, file)) return { ok: true, file: path.basename(file), bytes: fs.statSync(file).size };
-        }
-        const md = path.join(ROOT_DIR, slug(title) + '.md');
-        fs.writeFileSync(md, '# ' + spec.title + '\n\n' + spec.paragraphs.join('\n\n') + '\n', 'utf8');
-        return { ok: true, file: path.basename(md), note: 'python-docx not installed — made Markdown instead (pip install python-docx enables Word).' };
-      },
+      run: async ({ title, paragraphs }) => module.exports._makeDoc(String(title).slice(0, 120), paras(paragraphs)),
     },
     {
       name: 'create_deck', sideEffect: 'write',
-      description: 'Render a slide deck: real .pptx when python-pptx exists, otherwise a self-contained HTML deck.',
+      description: 'Render a slide deck: real .pptx when python-pptx is installed, otherwise a self-contained HTML deck — always a usable artifact with an honest note.',
       input_schema: {
         type: 'object',
         properties: { title: { type: 'string' }, slides: { type: 'array', items: { type: 'object' } } },
         required: ['title', 'slides'],
       },
-      run: async ({ title, slides }) => {
-        const spec = { title: String(title).slice(0, 120), slides: (Array.isArray(slides) ? slides : []).slice(0, 40) };
-        if (pythonHas('pptx')) {
-          const file = path.join(ROOT_DIR, slug(title) + '.pptx');
-          if (pythonMake('pptx', spec, file)) return { ok: true, file: path.basename(file), bytes: fs.statSync(file).size, format: 'pptx' };
-        }
-        const out = makeHtmlDeck(spec.title, spec.slides);
-        return { ok: true, ...out, note: 'python-pptx not installed — made an HTML deck (pip install python-pptx enables .pptx).' };
-      },
+      run: async ({ title, slides }) => module.exports._makeDeck(String(title).slice(0, 120), (Array.isArray(slides) ? slides : []).slice(0, 40)),
     },
     {
       name: 'create_website', sideEffect: 'write',
@@ -197,6 +268,28 @@ module.exports = {
         const file = path.join(ROOT_DIR, slug(title) + '.pdf');
         fs.writeFileSync(file, makePdf(title, ['Ask me to "write a document about …" with the cloud brain on and I will fill this with real content.']));
         return { say: `PDF ready — ${path.basename(file)} in your files folder.`, data: { file: path.basename(file) } };
+      },
+    },
+    /* Word docs + decks as FIRST-CLASS voice requests (Brahma-Lite parity):
+       these work offline / lean, and the reply names the exact format made and
+       what to install for the native one. */
+    {
+      patterns: [/^(?:make|create|write)(?: me)? a (?:new )?(?:word doc|word document|docx|document) (?:about|for|called|on)\s+(.+)$/i],
+      run: async (m) => {
+        const title = m[1].replace(/[.?!]+$/, '');
+        const out = await _makeDoc(title, [`First page about ${title}. Ask me to "write a longer document about ${title}" with the cloud brain on and I will fill it with real content.`]);
+        return { say: `${out.format === 'docx' ? 'Word document' : 'Markdown doc'} ready — ${out.file} in your files folder.${out.note ? ' ' + out.note : ''}`, data: out };
+      },
+    },
+    {
+      patterns: [/^(?:make|create|build)(?: me)? an? (?:powerpoint|power point|presentation|slide deck|deck) (?:about|for|called|on)\s+(.+)$/i],
+      run: async (m) => {
+        const title = m[1].replace(/[.?!]+$/, '');
+        const out = await _makeDeck(title, [
+          { title, bullets: [`Opening overview of ${title}.`] },
+          { title: 'Next steps', bullets: [`Ask me to "write a presentation about ${title}" with the cloud brain on — I will fill every slide.`] },
+        ]);
+        return { say: `${out.format === 'pptx' ? 'PowerPoint deck' : 'HTML deck'} ready — ${out.file || out.dir}.${out.note ? ' ' + out.note : ''}`, data: out };
       },
     },
   ],

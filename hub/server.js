@@ -51,27 +51,31 @@ const keyMig = require('./keymigrate').migrateEnvKeys({ settings, envFile: path.
 if (keyMig.fromSettings || keyMig.migrated) {
   console.log(`[config] OpenRouter keys consolidated into .env (appended ${keyMig.migrated || keyMig.fromSettings ? 'slots' : 'none'}; purged from settings: ${keyMig.purgedSettings}) — one source of truth from now on.`);
 }
-/* Boot preflight: all 3 rotation slots must be present — never silently start
-   with fewer keys. The ONLY sanctioned bypass is the explicit test/CI var
-   JARVIS_ALLOW_KEYLESS=1 (documented in .env.example; prints loudly too). */
+/* Boot gate (v1.1.0 — supersedes the v1.0.7 partial-rotation refusal):
+   JARVIS refuses to start only when NO sanctioned provider has any keys
+   (OpenRouter host · Groq sub-agents/TTS · Gemini overflow) and the explicit
+   JARVIS_ALLOW_KEYLESS=1 CI override isn't set. A partial OpenRouter ring boots
+   but prints LOUDLY, naming the missing slots — the overflow brains carry the
+   fallback there, per the owner's multi-agent architecture. Keys remain
+   .env-only everywhere; nothing here accepts, stores, or echoes a value. */
+const { bootGate } = require('./keyring');
+const bootKeys = bootGate();
 {
-  const { missingSlots } = require('./keyring');
-  const missing = missingSlots();
-  if (missing.length) {
-    const msg = `[config] ✗ OpenRouter rotation incomplete — missing from .env: ${missing.join(', ')}. ` +
-      'Add all three keys (https://openrouter.ai/keys) as OPENROUTER_KEY_1=, OPENROUTER_KEY_2=, OPENROUTER_KEY_3=. ' +
-      'Jarvis refuses to start with a partial rotation. (CI/test boots may set JARVIS_ALLOW_KEYLESS=1 to override.)';
-    if (process.env.JARVIS_ALLOW_KEYLESS === '1') {
-      console.warn(msg.replace('✗', '⚠').replace('Jarvis refuses to start with a partial rotation.', 'Starting anyway because JARVIS_ALLOW_KEYLESS=1 is set explicitly.'));
-      diag.record('cloud brain key rotation', true, `KEYLESS OVERRIDE · missing ${missing.join(', ')}`);
-    } else {
-      console.error(msg);
-      diag.record('cloud brain key rotation', false, `missing ${missing.join(', ')} — refusing to start`);
-      diag.printReport('[boot]');
-      process.exit(1);
-    }
-    } else {
-    diag.record('cloud brain key rotation', true, '3/3 slots present (OPENROUTER_KEY_1..3, .env-only)');
+  const keyless = process.env.JARVIS_ALLOW_KEYLESS === '1';
+  if (!bootKeys.anyCloud && !keyless) {
+    console.error(`[config] ✗ no cloud-brain keys found in .env — add OpenRouter keys (https://openrouter.ai/keys) as OPENROUTER_KEY_1=, OPENROUTER_KEY_2=, OPENROUTER_KEY_3= (sanctioned alternates: GROQ_KEY_1..n for sub-agents/TTS, GEMINI_KEY_1..n for overflow). Jarvis refuses to start with no keys at all. (CI/test boots may set JARVIS_ALLOW_KEYLESS=1 to override.)`);
+    diag.record('cloud brain key rotation', false, `missing ${bootKeys.missing.join(', ')} and no other provider keys — refusing to start`);
+    diag.printReport('[boot]');
+    process.exit(1);
+  } else if (!bootKeys.anyCloud) {
+    console.warn('[config] ⚠ no cloud-brain keys configured — starting anyway because JARVIS_ALLOW_KEYLESS=1 is set explicitly (missing: ' + bootKeys.missing.join(', ') + ').');
+    diag.record('cloud brain key rotation', true, `KEYLESS OVERRIDE · missing ${bootKeys.missing.join(', ')}`);
+  } else if (bootKeys.missing.length) {
+    console.warn(`[config] ⚠ OpenRouter rotation is partial — missing from .env: ${bootKeys.missing.join(', ')}. Booting on ${bootKeys.counts.openrouter}/3 host keys (overflow: groq ${bootKeys.counts.groq}, gemini ${bootKeys.counts.gemini}); add the missing slots when convenient.`);
+    log.write('config.warning', { message: `partial OpenRouter ring: missing ${bootKeys.missing.join(', ')}` });
+    diag.record('cloud brain key rotation', true, `KEYLESS OVERRIDE not needed · partial ring ${bootKeys.counts.openrouter}/3 — missing ${bootKeys.missing.join(', ')}; groq ${bootKeys.counts.groq}, gemini ${bootKeys.counts.gemini}`);
+  } else {
+    diag.record('cloud brain key rotation', true, '3/3 slots present (OPENROUTER_KEY_1..3, .env-only) · groq ' + bootKeys.counts.groq + ' · gemini ' + bootKeys.counts.gemini);
   }
 }
 if (settings.data.timezone) process.env.TZ = settings.data.timezone; // hub speaks local time (IST default)
@@ -125,7 +129,7 @@ orchestrator.isLockedDown = (user) => lockedDown(user); // sensitive-freeze intr
 const audit = new AuditLog();
 const diagnostician = new Diagnostician({ store: new SecureStore('diagnostics'), log, audit, bus });
 const grounding = new Grounding({ memory, search: (q) => require('./skills/search').wikiSummary(q), net, log, audit });
-const modelRouter = new ModelRouter({ env: process.env, settings, ollama: orchestrator.ollama, net, keyCount: () => orchestrator._ring().size, audit, log });
+const modelRouter = new ModelRouter({ env: process.env, settings, ollama: orchestrator.ollama, net, keyCount: () => orchestrator._ring().size, keyCountFor: (p) => orchestrator._ring(p).size, audit, log });
 const localProc = new LocalProc({ ollama: orchestrator.ollama, audit, log });
 orchestrator.attachBrain({ diagnostician, audit, modelRouter, localProc, grounding });
 diag.record('audit log (tamper-evident)', true, 'HMAC-chained to data/.master.key — /api/audit/verify');
@@ -441,6 +445,9 @@ route('GET', /^\/api\/health$/, async (req, res) => {
     online: net.online, uptime: Math.round(process.uptime()),
     skills: registry.describe().length, satellites: satellites.list().filter((s) => s.online).length,
     sessions: memory.sessions.size, pendingTasks,
+    // v1.1.0: counts only — never key material (same doctrine as every other surface)
+    providers: bootKeys.counts,
+    tts: { live: !!process.env.TTS_MODEL && bootKeys.counts.groq > 0, model: process.env.TTS_MODEL || null },
   });
 });
 
@@ -602,6 +609,56 @@ route('GET', /^\/api\/ollama\/status$/, async (req, res) => {
   try { send(res, 200, await orchestrator.ollama.statusLive({ kick: false })); }
   catch (e) { send(res, 200, { state: 'down', url: orchestrator.ollama.url(), model: orchestrator.ollama.model(), reachable: false, error: e.message }); }
 });
+/* ---------- v1.1.0 server-side voice (TTS) ----------
+   An Orpheus-class model on Groq (or any OpenAI-compatible /audio/speech base via
+   TTS_BASE) speaks replies with the owner's dry-butler preset. Opt-in per device
+   (Settings toggle, localStorage) — and ANY failure here just falls back to the
+   browser's own voices client-side. Privacy: spoken text is never persisted —
+   events carry byte counts and status codes only. Keys: GROQ_KEY_1..n (.env-only). */
+let __ttsRing = null, __ttsRingSig = '';
+route('POST', /^\/api\/tts$/, async (req, res, m, body) => {
+  const ttsModel = process.env.TTS_MODEL || '';
+  if (!ttsModel) { send(res, 503, { error: 'server TTS is not configured — set TTS_MODEL in .env' }); return; }
+  const text = String((body && body.text) || '').trim().slice(0, 1200);
+  if (text.length < 2) { send(res, 400, { error: 'nothing to speak' }); return; }
+  const { KeyRing, loadKeysFor } = require('./keyring');
+  const keys = loadKeysFor('GROQ');
+  const sig = keys.join('|');
+  if (!__ttsRing || __ttsRingSig !== sig) { __ttsRing = new KeyRing(keys); __ttsRingSig = sig; }
+  if (!__ttsRing.size) { log.write('tts', { ok: false, why: 'no-keys' }); send(res, 503, { error: 'server TTS needs GROQ keys in .env' }); return; }
+  const base = (process.env.TTS_BASE || process.env.GROQ_BASE || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
+  const ring = __ttsRing;
+  let lastStatus = 0, lastWhy = '';
+  const tries = Math.max(1, ring.size);
+  for (let i = 0; i < tries; i++) {
+    const pick = ring.next();
+    if (!pick) break;
+    let r;
+    try {
+      r = await fetch(base + '/audio/speech', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + pick.key },
+        body: JSON.stringify({ model: ttsModel, input: text, response_format: 'mp3', ...(process.env.TTS_VOICE ? { voice: process.env.TTS_VOICE } : {}) }),
+        signal: AbortSignal.timeout(25000),
+      });
+    } catch (e) { ring.fail(pick.index, {}); lastWhy = String((e && (e.name || e.message)) || 'network').slice(0, 60); continue; }
+    if (r.ok) {
+      ring.ok(pick.index);
+      const buf = Buffer.from(await r.arrayBuffer());
+      log.write('tts', { ok: true, bytes: buf.length });
+      send(res, 200, buf, 'audio/mpeg');
+      return;
+    }
+    const t = await r.text().catch(() => '');
+    lastStatus = r.status; lastWhy = t.slice(0, 140);
+    if (r.status === 401 || r.status === 402 || r.status === 403) { ring.fail(pick.index, { hard: true }); continue; }
+    if (r.status === 429 || r.status >= 500) { ring.fail(pick.index, {}); continue; }
+    break; // plain 4xx: a bad model/voice name — rotating keys cannot help
+  }
+  log.write('tts', { ok: false, status: lastStatus || null, why: lastWhy || 'unreachable' });
+  send(res, 502, { error: lastStatus ? 'voice engine HTTP ' + lastStatus : 'voice engine unreachable' });
+});
+
 route('POST', /^\/api\/ollama\/pull$/, async (req, res) => {
   try {
     const st = await orchestrator.ollama.statusLive({ kick: true });

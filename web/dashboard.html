@@ -249,13 +249,20 @@
     } catch {}
   }
 
+  /* Daily briefing with interruption-aware playback (Brahma-Lite parity):
+     while it speaks, the button turns into a stop control — pressing it
+     mid-speech ends the TTS instead of queueing/ignoring. */
+  let briefSpeaking = false;
   $('b-brief').onclick = async () => {
-    $('b-brief').textContent = 'Speaking…';
+    if (briefSpeaking) { MAX.stopSpeaking(); return; }
+    $('b-brief').textContent = 'Speaking… tap to stop';
+    briefSpeaking = true;
+    const done = () => { briefSpeaking = false; $('b-brief').textContent = 'Daily briefing'; };
     try {
       const res = await MAX.post('/api/utterance', { text: 'briefing', user: MAX.user() });
-      MAX.speak(res.say, {});
-    } catch { alert('Hub unreachable'); }
-    $('b-brief').textContent = 'Daily briefing';
+      MAX.speak(res.say, { onend: done });
+      if (!('speechSynthesis' in window) || MAX.LS.get('textOnly', false)) done(); // common.js fires onend sync — belt
+    } catch { alert('Hub unreachable'); done(); }
   };
 
   /* live updates */

@@ -4,6 +4,192 @@
 > under the original product name **MAX AI**; this fork continues as **Jarvis**
 > from v1.0.0 onward. History below the v1.0.0 entry is inherited verbatim.
 
+## v1.1.1 — Main page: HUD widget layer removed, text chat made first-class (2026-09-16)
+
+Owner request (screenshot: four empty pill shells). The HUD widget layer on the
+voice page degraded to empty outlines whenever its data feeds were unavailable
+— decoration that reads as breakage. It is REMOVED from `web/index.html`
+(widget mounts, `#hudBtn` toggle, `js/widgets.js` script tag); the widget
+machinery and theme styles remain untouched in the tree.
+
+**Text chat is no longer a hidden toggle.** The composer panel (input + bubble
+log, both fed through the existing `/api/utterance` pipeline — voice and typed
+turns share one transcript) now renders always; the "Type instead" dock button
+and its gate are gone, and the hint line advertises typing. Mic-unavailable
+states still reveal the panel defensively (their `open` class is a no-op now —
+kept for stale SW-cached copies).
+
+**Test re-pin (flagged):** J12-era J4 "index.html mounts all 4 HUD widgets +
+hide toggle + shared script" is replaced by four pins guarding the NEW
+contract — no HUD layer on the main page, chat always mounted, Enter-to-send
+intact, single shared transcript. No other suite touched (J3's theme-token
+pins and the widgets.js API checks still pass as written). No security,
+voice-verification, or dispatch logic changed.
+
+## v1.1.0 — Multi-brain: Host + silent sub-agents + overflow fallback + server voice (2026-09-16)
+
+The owner's delivered architecture is now the product: one persona, a small
+ensemble behind it. **Host** (OpenRouter rung) owns every conversation; the new
+`delegate` skill lets it hand ONE narrow mechanical task at a time to a silent
+**sub-agent** on Groq (results integrated by the Host — the staff is never
+mentioned); any `groq:`/`gemini:` rung in `MODEL_PRIORITY` can carry the chat as
+**overflow**, running the Host prompt verbatim so the switch is invisible.
+**Server voice**: `POST /api/tts` synthesizes replies (Orpheus-class model on
+Groq, `TTS_MODEL`/`TTS_VOICE` in `.env`); the web client prefers it per-device
+(new Settings switch) and falls back to browser voices on ANY failure —
+barge-in cancels both paths, text-only mode still wins over everything.
+
+**Keys & gates:** `.env`-only policy unchanged and now generalized —
+`GROQ_KEY_1..n` and `GEMINI_KEY_1..n` slots beside `OPENROUTER_KEY_n`, gap-
+tolerant, no UI editing anywhere (Settings grows a READ-ONLY brains line:
+counts only, same masking doctrine). The boot gate refuses to start only when
+NO sanctioned provider has any key (naming OPENROUTER_KEY_1..3); a partial
+OpenRouter ring boots with a loud warning naming the empty slot, since overflow
+keys carry the fallback. `JARVIS_ALLOW_KEYLESS=1` override behaves as before.
+
+**Prompt discipline:** the system prompt teaches ensemble invisibility — present
+results as your own; never name models/providers/key counts (unless the owner
+is debugging the hub directly); never reference or apologize for a fallback
+switch. Degrading down the cloud ladder now asks for confirmation even when the
+provider changes (was OpenRouter-only); the ollama floor stays exempt.
+
+**Test re-pins (flagged, not silent — owner's architecture supersedes v1.0.7
+single-provider doctrine):** J16 partial-rotation `exit(1)` → loud-warn-then-boot
+with a new zero-keys-must-still-refuse case; test-features #15 provider hygiene
+"no Gemini strings in hub code" → sanctioned-origin allow-set (openrouter.ai,
+api.groq.com, generativelanguage.googleapis.com, loopback) + no-key-literals
+assertion kept; J12 skill count 26 → 27 (delegate); test-systems diag
+`26/26 skills loaded` → 27/27. No existing check was weakened or removed —
+each pin moved only where the delivered architecture required it. New coverage:
+J17 (multi-brain keyring arithmetic, invisibility clauses, sub-agent prompt
+discipline, TTS never persists spoken text), test-features #19 (delegate
+happy-path against a mock Groq with Bearer/temperature assertions, /api/tts
+503 + live-hub byte passthrough, health provider-count surface, Settings
+read-only surface), test-modelroute +6 (provider prefixes, per-provider key
+gating, cross-provider degrade, base resolution).
+
+**Debug pass (same-day, folded into this unreleased entry):** two overlap
+defects found and fixed in the new surface. The web voice client treated a
+barge-in/stop ABORT of an in-flight `/api/tts` request as an engine failure —
+it re-spoke the cancelled text through browser voices, latched server voice
+off for the page, left a playing stream running under the next one (two audio
+streams overlapping), and stranded callers whose `onend` never fired (stuck
+briefing button). Now: a generation token + explicit cancel flag distinguish
+cancellation from failure; every `speak()` halts the live server stream first
+(one utterance at a time, cancel-don't-stack); superseded late resolves are
+revoked and settled; genuine timeouts/5xx still degrade to device voices
+exactly as before. Server side: the overflow ring cache compared ONE shared
+signature across providers, so alternating groq/gemini rungs rebuilt each
+other's KeyRing on every call — soft/hard key cooldowns never survived;
+signatures are now tracked per provider (plus a dead `return` removed). Two
+regression checks added (test-features, J17); suite now 696 checks green.
+
+**Housekeeping:** `.env.example` documents all three providers + TTS/SUBAGENT
+vars, and its example OpenRouter lines became commented placeholders (they sat
+in a PUBLIC repo in real key shape — if any were ever real, rotate them); the
+v1.0.7 note "there is no separate Gemini provider" is replaced by the prefix
+syntax. Voice verification, security gates, AES-256-GCM stores, injection
+containment and the audit chain are untouched.
+
+## v1.0.12 — Owner persona adopted: the JARVIS voice is now a British butler (2026-09-16)
+
+The owner-supplied personality spec is folded into `hub/persona.js` at the
+two seams it was built for — identity text into the fork-branded VOICE block
+(the ONLY repo-specific part per the lockstep rule), and conduct rules into
+the generic prompt base, so every voice inherits the discipline while only
+Jarvis gets the livery.
+
+**VOICE (Jarvis):** world-class British butler who has seen everything and is
+no longer impressed — unfailingly polite, never ruffled; addresses the user as
+"sir" by default, "Avyansh" only occasionally for emphasis or warmth; formal
+phrasing ("Might I suggest…") even when the content is cheeky; loyal
+underneath, and the care shows when it matters. **witStyle:** one dry line
+dropped mid-sentence then move on like nothing happened; roast the user's
+*decisions*, never the user; a quiet "I have seen this before" is welcome,
+gloating isn't; never cruel. **reassureStyle** keeps facts-first and drops
+the act until resolved.
+
+**Prompt base (every voice, every register):** the comedy is garnish, not the
+meal (answer/action first; never announce a joke; say nothing if nothing is
+grounded); stakes-match — wit suspended ENTIRELY for safety, money,
+irreversible actions, confirmations, or real distress; concise spoken prose,
+no lists/headers/markup unless structure is wanted; no unprompted
+self-intros, no service theatrics.
+
+Guarantees untouched: grounded-or-silent (no anchor → no clause), accuracy
+first (persona never prepends/softens a diagnosis, security warning, or
+confirm prompt), BANNED engagement-bait screening, deterministic
+"Steady —" closes, honest framing on feelings questions, and
+voice-≠-assistantName. Gating is still structural, not stylistic: the wit
+rule is prompt-level color; the hard gates (voice verification, confirm
+flows, kid/guest blocks) never consulted personality and still don't.
+
+tools/test-persona.js +6 checks (38→44): butler identity baked in VOICE,
+Wit roasts decisions, never the user — the three base rules ride every
+prompt in every register, and a foreign voice provably inherits the rules but
+none of the butler (lockstep discipline pinned). README documents the voice.
+
+## v1.0.11 — Brahma-Lite cherry-picks: quiet Windows launch, office-generation depth, barge-in briefings + repo restoration (2026-09-16)
+
+Selected parity work from the smaller Brahma AI - Lite desktop assistant —
+nothing ported that Jarvis already does better (routing, plugin system,
+browser, gestures all stay as-is); no security gate, encryption or audit path
+was touched. Plus one required housekeeping restoration (see "Tree restored"
+below). 24 suites green: **661 checks + keyring PASS** (was 637).
+
+**Tree restored (repo-critical fix):** the GitHub "Add files via upload"
+import had flattened the tree into the root — `package.json`, `tools/`,
+`hub/skills/` and every `../hub//../web/` require were dead paths and
+`npm test` couldn't start. All files git-mv'd back to the layout pinned by
+`integrity.sh` + `test-jarvis` J12 (`hub/ hub/skills/ tools/ web/ scripts/
+docs/ satellite/esp32/`), and committed local state (`.master.key`,
+`settings.enc*.json`) was **untracked into gitignored `data/`** per the
+repo's own "never commit" convention — rotate that key if the public repo
+existed with it tracked. Three environment/harness bugs surfaced while
+re-greening: `tools/check.js` now mirrors the suites' boot boilerplate
+(`JARVIS_ALLOW_KEYLESS=1` + isolated port; J16's standalone preflight
+unaffected); the dev-sandbox spawned `node` with `env:{}` — PATH-blind outside
+apt installs (`process.execPath` now, flags unchanged); `test-keyring` pins its
+probe to its own mock (established test-chaos pattern).
+
+**1 · Quiet native launcher (Brahma's `start_brahma.vbs`, elevated):**
+`scripts/windows/start-jarvis-quiet.vbs` — double-click starts
+`node hub/server.js` **with no console window**, then exits; it probes
+`/api/health` on 127.0.0.1 first so a second run is a no-op (never a
+duplicate server). Optional `scripts/windows/jarvis-tray.ps1` — zero-dep
+WinForms tray: live status (same health fields), open app/Remote/Settings,
+quiet start, and a **PID-scoped stop** (only kills the process it launched —
+no broad `taskkill`). Both are launcher/control only: no config surface, no
+credentials, same security posture. Pinned by 7 new launcher checks (health
+shape proven live). *(test-features #16)*
+
+**2 · Office-document generation depth (`hub/skills/create.js`):** interpreter
+discovery now spans `python3` → `python` → `py -3` — each **validated by
+running it**, so the Windows Store alias stub can't hijack generation — with a
+documented `MAX_PY_CREATE` test/dev hook. Degradation is now *typed*: no
+python vs. missing lib vs. generator crash vs. clean-but-empty generator, each
+naming the exact fix (`pip install python-docx|python-pptx` — module ≠ pip
+name) while the fallback file (Markdown / HTML deck) still ships: **no silent
+failure on any branch**. Word + decks became first-class **voice requests**
+(offline-capable intents sharing one render path with the LLM tools), and a
+live capability line surfaces in **Settings → Skills** (registry `describe()`
++ escaped render). Registry hardening found by the new tests and pinned:
+`describe()` must call **sync** `status()` only — skills like `github` expose
+an async `status()` that hits the live API for their confirm flow; a read-only
+Settings/health poll must never trigger that. *(test-features #17, 11 checks —
+a stub interpreter drives all five branches deterministically)*
+
+**3 · Interruption-aware briefing playback (Brahma's barge-in):** the
+briefing's `long: true` now reaches the client as a real signal. While a
+long-form answer speaks, a fresh **wake word interrupts the TTS mid-speech**
+and drops straight into capture — even if the mic path then fails (stop-first,
+so a briefing can't keep talking); any submitted command (incl. text box) also
+cancels current playback. Short replies are deliberately *not*
+interrupt-armed (self-echo guard) and SOS/alert audio stays tap-only.
+Jarvis Remote's briefing button became a live tap-to-stop. Documented as a
+skill-contract field in `docs/ADDING_A_SKILL.md`. *(test-features #18, 6
+checks incl. the hub passthrough)*
+
 ## v1.0.10 — Self-review regression pass: treat the last three passes as unverified (2026-09-04)
 
 Lockstep across both products (same diffs, both suites run in both repos).

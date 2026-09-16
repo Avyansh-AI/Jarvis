@@ -94,12 +94,24 @@ class Registry {
   }
 
   describe() {
-    return [...this.skills.values()].map((s) => ({
-      name: s.name, label: s.label || s.name, description: s.description || '',
-      version: s.version || '1.0.0', enabled: this.enabled(s),
-      sensitive: !!s.sensitive, personalData: !!s.personalData, kidBlocked: !!s.kidBlocked,
-      intents: (s.intents || []).length, tools: (s.tools || []).length,
-    }));
+    return [...this.skills.values()].map((s) => {
+      const row = {
+        name: s.name, label: s.label || s.name, description: s.description || '',
+        version: s.version || '1.0.0', enabled: this.enabled(s),
+        sensitive: !!s.sensitive, personalData: !!s.personalData, kidBlocked: !!s.kidBlocked,
+        intents: (s.intents || []).length, tools: (s.tools || []).length,
+      };
+      // optional SYNC read-only capability line, shown in Settings → Skills
+      // (e.g. create: which Office backends are live). Explicitly NOT called
+      // when async: some skills (github) expose an async status() that hits
+      // live APIs for the confirm flow — describe() runs on every /api/health
+      // and /api/skills read, so only zero-network sync lines are safe here.
+      // Never blocks or throws — a skill with a broken status() just reports none.
+      if (typeof s.status === 'function' && s.status.constructor.name !== 'AsyncFunction') {
+        try { const st = s.status(); if (st) row.status = String(st).slice(0, 160); } catch { /* none */ }
+      }
+      return row;
+    });
   }
 }
 

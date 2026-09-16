@@ -216,3 +216,41 @@ Full chains at the final tree: jarvis **24 suites, 637 checks, zero FAIL,
 exit 0** (`/tmp`-capture retained during session); MAX **23 suites, 613
 checks, zero FAIL, exit 0**. Versions bumped: jarvis 1.0.9→1.0.10,
 MAX 0.11.10→0.11.11; J12's independent-tree count 23→24.
+
+## 2026-09-16 pass — jarvis v1.0.11 — Brahma-Lite cherry-picks + tree restoration
+
+**Trigger:** the repo's GitHub copy had been flattened by an "Add files via
+upload" import — every `hub/ tools/ web/ scripts/ docs/ satellite/` path in
+package.json, requires, integrity.sh and J12 was dead; `npm test` could not
+start. Restored via `git mv` to the layout J12/test-physical pin; committed
+local state (`.master.key`, `settings.enc*.json`) untracked into gitignored
+`data/` (rotate the key if the public repo existed while tracked).
+Re-greening surfaced three harness/portability bugs, each fixed at the root,
+none weakening a gate: check.js now mirrors the suites' boot boilerplate
+(JARVIS_ALLOW_KEYLESS=1 test/CI override + isolated port; standalone preflight J16 untouched);
+dev-sandbox node spawn uses `process.execPath` (PATH-blind `env:{}` failed on
+non-apt installs — sandbox flags unchanged); test-keyring pins its probe to
+its own mock (test-chaos pattern). Baseline after restoration: **24 suites,
+637 checks, keyring PASS, exit 0.**
+
+**Feature work (Brahma AI - Lite parity — cherry-picked, not re-ported):**
+
+| # | Item | New checks | Live evidence |
+|---|---|---|---|
+| 1 | `scripts/windows/start-jarvis-quiet.vbs` (hidden start, dup-safe health probe, same `hub/server.js` entry) + `jarvis-tray.ps1` (WinForms tray, PID-scoped stop, no creds) | test-features #16 (7) | health shape proven live on the :8114 hub; static asserts pin hidden window style, localhost-only probes, no secret patterns |
+| 2 | `create` skill office depth: python3→python→py -3 validated discovery, typed degradation notes (no-python/no-lib/crash/empty-gen), native paths kept, Word/deck voice intents, `status()` line in Settings → Skills; registry `describe()` **sync-status-only** guard (github's async status hits the live API — poll would hammer it) | test-features #17 (11) | POSIX stub interpreter drives all five branches deterministically; fallback files written + notes matched; `/api/skills` carries status, github row provably has none |
+| 3 | Interruption-aware briefing playback: `long:true` hub→client; wake word barge-in arms only during long-form speech; TTS stops **before** mic path; any send cancels; short replies never armed; alert stays tap-only; Remote briefing button = tap-to-stop | test-features #18 (6) | briefing utterance on live keyless hub returns `long:true` through `_runHit/_finish`; static source pins each behavior |
+
+**Deliberately NOT ported from Brahma (Jarvis superior):** its single-brain
+fallback logic (Jarvis: multi-brain rotation + lean mode + local, test-lean +
+test-keyring), its ad-hoc plugin loader (Jarvis: registry w/ gating +
+Settings), its Playwright automation (out of constraint scope; browse stays
+fetch+SSRF-guarded), gesture control (Jarvis default-off verified seams S8),
+and its non-encrypted persistence — nothing in Jarvis was downgraded to
+Brahma behavior. Voice verification, encryption, injection containment and the
+tamper-evident audit log were untouched by all three changes.
+
+Full chain at the final tree: **24 suites, 661 checks + keyring PASS, 0
+failed, CHAIN_EXIT=0.** Version 1.0.10→1.0.11; docs updated (README launcher +
+test counts, ADDING_A_SKILL `long`/`status` contract, CHANGELOG entry,
+.env.example `MAX_FILES_ROOT`/`MAX_PY_CREATE`).

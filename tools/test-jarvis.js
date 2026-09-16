@@ -16,7 +16,7 @@
      J13 v1.0.7: NO OpenRouter key UI anywhere in web (settings/dashboard); writes 410
      J14 keyring reads .env OPENROUTER_KEY_n ONLY — legacy aliases + settings ignored
      J15 keymigrate folds settings+alias keys into .env once, purges store, idempotent
-     J16 boot preflight refuses partial rotations, naming the missing slot; override boots
+     J16 boot gate: no keys anywhere → refuse; partial ring → loud warn + boot (v1.1.0 re-pin)
 */
 const fs = require('fs');
 const path = require('path');
@@ -52,13 +52,21 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
     theme.includes('.hud-widget') && theme.includes('body.widgets-hidden .hud-layer'));
 }
 
-/* J4: widget layer on the main page */
+/* J4 (RE-PIN v1.1.1 — owner directive): the HUD widget layer was REMOVED from
+   the main page (empty pill shells when feeds were down stole the focus); the
+   text chat is promoted to an always-mounted first-class surface. The widget
+   machinery itself stays in the tree (js/widgets.js + theme styles) — this pin
+   guards the main page only. */
 {
   const idx = read('web/index.html');
-  const kinds = [...idx.matchAll(/data-widget="([a-z]+)"/g)].map((m) => m[1]);
-  ok('J4: index.html mounts all 4 HUD widgets around the ring + hide toggle + shared script',
-    ['weather', 'clock', 'devices', 'activity'].every((k) => kinds.includes(k))
-      && idx.includes('id="hudBtn"') && idx.includes('js/widgets.js') && idx.includes('MAX.widgets.mountAll()'));
+  ok('J4: index.html has NO HUD layer (no data-widget mounts, no hud toggle, no widgets.js script tag)',
+    !/data-widget="/.test(idx) && !/id="hudBtn"/.test(idx) && !/<script src="js\/widgets\.js">/.test(idx));
+  ok('J4: text chat is first-class — panel defaults to flex (no toggle gate), composer + log present',
+    /\.chat \{ display: flex;/.test(idx) && idx.includes('id="chatInput"') && idx.includes('id="chatLog"') && idx.includes('id="chatForm"'));
+  ok('J4: no "Type instead" toggle remains and Enter-to-send path is intact',
+    !/id="typeBtn"/.test(idx) && /chatForm\.addEventListener\('submit'/.test(idx) && /sendUtterance\(t\)/.test(idx));
+  ok('J4: voice replies still land in the same chat log (single transcript for both input modes)',
+    /addBubble\('max', res\.say, res\.cards\)/.test(idx));
 }
 
 /* J5: widgets only use pre-existing public APIs */
@@ -121,8 +129,8 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   const skills = fs.readdirSync(path.join(ROOT, 'hub/skills'))
     .filter((f) => f.endsWith('.js') && f !== 'registry.js' && !f.startsWith('_'));
   const testFiles = fs.readdirSync(path.join(ROOT, 'tools')).filter((f) => /^test-.*\.js$/.test(f));
-  ok('J12: complete independent tree (hub web tools scripts docs satellite, 26 skills, 24 test files — 19 legacy + this suite + brain-layer pair + persona/openers pair + regress)',
-    dirs.every(Boolean) && skills.length === 26 && testFiles.length === 24);
+  ok('J12: complete independent tree (hub web tools scripts docs satellite, 27 skills incl. v1.1.0 delegate, 24 test files — 19 legacy + this suite + brain-layer pair + persona/openers pair + regress)',
+    dirs.every(Boolean) && skills.length === 27 && testFiles.length === 24);
 }
 
 (async () => {
@@ -176,24 +184,61 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
       && settings.store.saved >= 1 && second.migrated === 0 && second.purgedSettings === false);
 }
 
-/* J16: boot preflight — fail fast naming the missing slot; explicit override boots */
+/* J16 (RE-PIN for v1.1.0 — see CHANGELOG): the boot gate now guards ABSENCE of
+   cloud capability across ALL sanctioned providers, not a partial OpenRouter
+   ring (the overflow brains carry the fallback there). Three cases: nothing
+   anywhere → refuse naming slots 1..3; partial OpenRouter ring → boot with a
+   LOUD warning naming the exact empty slot; JARVIS_ALLOW_KEYLESS=1 with
+   nothing → boot, override printed loudly naming the same slots. */
 {
   const os = require('os');
   const { spawnSync, spawn } = require('child_process');
-  const base = { ...process.env, MAX_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'jar-bootchk-')), MAX_FILES_ROOT: fs.mkdtempSync(path.join(os.tmpdir(), 'jar-bootchk-f-')), PORT: '0', OPENROUTER_KEY_1: 'k1', OPENROUTER_KEY_2: '', OPENROUTER_KEY_3: 'k3', JARVIS_ALLOW_KEYLESS: '0', OPENROUTER_API_KEYS: '', OPENROUTER_API_KEY: '' }; // NOTE: blanking legacy aliases keeps test boots from folding the repo .env's legacy lines
-  const failRun = spawnSync(process.execPath, ['hub/server.js'], { cwd: ROOT, env: base, encoding: 'utf8', timeout: 15000 });
-  ok('J16: partial rotation → exit(1) naming the exact missing variable (never a silent 2-key start)',
-    failRun.status === 1 && (failRun.stderr + failRun.stdout).includes('OPENROUTER_KEY_2'));
-  const bootRun = spawn(process.execPath, ['hub/server.js'], { cwd: ROOT, env: { ...base, JARVIS_ALLOW_KEYLESS: '1' }, encoding: 'utf8' });
-  const heard = await new Promise((resolve) => {
+  const base = { ...process.env, MAX_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'jar-bootchk-')), MAX_FILES_ROOT: fs.mkdtempSync(path.join(os.tmpdir(), 'jar-bootchk-f-')), PORT: '0', OPENROUTER_KEY_1: 'k1', OPENROUTER_KEY_2: '', OPENROUTER_KEY_3: 'k3', GROQ_KEY_1: '', GEMINI_KEY_1: '', JARVIS_ALLOW_KEYLESS: '0', OPENROUTER_API_KEYS: '', OPENROUTER_API_KEY: '' }; // NOTE: blanking legacy aliases + overflow slots keeps test boots hermetic from the repo .env
+  const boot = (env, timeout = 15000) => new Promise((resolve) => {
+    const child = spawn(process.execPath, ['hub/server.js'], { cwd: ROOT, env, encoding: 'utf8' });
     let buf = '';
-    const to = setTimeout(() => resolve(buf), 15000);
-    bootRun.stdout.on('data', (d) => { buf += d; if (/on http:\/\/0\.0\.0\.0:/.test(buf)) { clearTimeout(to); resolve(buf); } });
-    bootRun.stderr.on('data', (d) => { buf += d; });
+    const to = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} resolve(buf); }, timeout);
+    child.stdout.on('data', (d) => { buf += d; if (/on http:\/\/0\.0\.0\.0:/.test(buf)) { clearTimeout(to); try { child.kill('SIGKILL'); } catch {} resolve(buf); } });
+    child.stderr.on('data', (d) => { buf += d; });
   });
-  bootRun.kill('SIGKILL');
-  ok('J16: JARVIS_ALLOW_KEYLESS=1 (explicit) boots with a LOUD override warning naming the same slot',
+  const empty = { ...base, OPENROUTER_KEY_1: '', OPENROUTER_KEY_3: '' };
+  const noneRun = spawnSync(process.execPath, ['hub/server.js'], { cwd: ROOT, env: empty, encoding: 'utf8', timeout: 15000 });
+  ok('J16: zero keys across every sanctioned provider → exit(1) naming OPENROUTER_KEY_1..3 (never a keyless start)',
+    noneRun.status === 1 && (noneRun.stderr + noneRun.stdout).includes('OPENROUTER_KEY_1') && (noneRun.stderr + noneRun.stdout).includes('GROQ_KEY_1'));
+  const partialHeard = await boot(base);
+  ok('J16 RE-PIN: partial OpenRouter ring now BOOTS (overflow-capable) but warns loudly, naming the exact empty slot',
+    /on http:\/\/0\.0\.0\.0:/.test(partialHeard) && /OPENROUTER_KEY_2/.test(partialHeard) && /partial/i.test(partialHeard));
+  const heard = await boot({ ...empty, JARVIS_ALLOW_KEYLESS: '1' });
+  ok('J16: JARVIS_ALLOW_KEYLESS=1 (explicit, nothing configured) boots with a LOUD override warning naming the missing slots',
     /JARVIS_ALLOW_KEYLESS=1/.test(heard) && /OPENROUTER_KEY_2/.test(heard) && /on http:\/\/0\.0\.0\.0:/.test(heard));
+}
+
+/* J17: v1.1.0 multi-brain — generic provider slots, the boot gate's arithmetic,
+   and the doctrine that the ensemble stays invisible from inside the prompt. */
+{
+  const { loadKeysFor, bootGate, providerCounts } = require('../hub/keyring');
+  ok('J17: loadKeysFor is the generic slot loader — gap-tolerant, trimmed, .env-only for ANY sanctioned prefix',
+    JSON.stringify(loadKeysFor('GROQ', { GROQ_KEY_1: ' a ', GROQ_KEY_2: '  ', GROQ_KEY_3: 'c', GROQ_KEY_4: 'd' })) === JSON.stringify(['a', 'c', 'd']));
+  const g1 = bootGate({ OPENROUTER_KEY_1: '', GROQ_KEY_1: 'g', GEMINI_KEY_1: '' }, 3);
+  ok('J17: bootGate sees all three sanctioned providers; OpenRouter slot names stay canonical in missing[]',
+    g1.counts.openrouter === 0 && g1.counts.groq === 1 && g1.counts.gemini === 0 && g1.anyCloud === true && g1.missing.includes('OPENROUTER_KEY_1'));
+  ok('J17: the gate refuses ONLY total cloud absence — any single key anywhere boots (fallback-capable)',
+    bootGate({}, 3).anyCloud === false && bootGate({ OPENROUTER_KEY_2: 'k' }, 3).anyCloud === true && bootGate({ GEMINI_KEY_1: 'g' }, 3).anyCloud === true);
+  ok('J17: providerCounts never leaks values — numbers only',
+    Object.values(providerCounts({ OPENROUTER_KEY_1: 'super-secret', GROQ_KEY_1: 'x' })).every((v) => typeof v === 'number'));
+  const orchSrc = read('hub/orchestrator.js');
+  ok('J17: system prompt teaches ensemble invisibility — no model/provider disclosure, no narrated fallback switch',
+    /small ensemble of models working in concert/.test(orchSrc) && /never reference, apologize for, or explain a provider switch/.test(orchSrc));
+  const dlgSrc = read('hub/skills/delegate.js');
+  ok('J17: sub-agent prompt is pure execution discipline (no personality, answers the Host, no greetings)',
+    /You are NOT the user-facing personality/.test(dlgSrc) && /Skip greetings, sign-offs, and pleasantries entirely/.test(dlgSrc));
+  ok('J17: delegate results reach the Host as text only — no say/cards/broadcast path to the user',
+    !/say\s*:|cards\s*:/.test(dlgSrc) && !/broadcast|bus\.emit/.test(dlgSrc));
+  ok('J17: overflow ring cache keyed per provider — alternating groq/gemini calls cannot rebuild one another\'s ring (cooldowns survive)',
+    /__ringsSigs\[provider\] !== sig/.test(orchSrc) && /__ringsSigs\[provider\] = sig/.test(orchSrc)
+      && !/return this\.__rings\[provider\];\s*\n\s*return this\.__ring;/.test(orchSrc));
+  ok('J17: TTS persists no spoken text — hub events carry byte counts only',
+    /log\.write\('tts', \{ ok: true, bytes: buf\.length \}\)/.test(read('hub/server.js')) && !/log\.write\('tts',[^}]*text/.test(read('hub/server.js')));
 }
 
 console.log(`\n${pass} ok, ${fail} failed`);

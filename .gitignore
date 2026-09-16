@@ -3,3 +3,6 @@
 data/
 node_modules/
 nohup.out
+
+# jail output of the create/desktop skills — user artifacts, never commit
+files/

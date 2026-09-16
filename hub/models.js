@@ -3,7 +3,10 @@
  * Model ladder & router — automatic best-model selection with confirm-before-degrade.
  *
  * The ladder comes from .env `MODEL_PRIORITY` (comma list, best → worst):
- *   MODEL_PRIORITY=google/gemini-2.5-pro, anthropic/claude-sonnet-4-5, openai/gpt-4o-mini, ollama:llama3.1
+ *   MODEL_PRIORITY=openai/gpt-oss-120b, gemini:gemini-3.1-flash, groq:qwen3-8-27b, ollama:llama3.1
+ * Entries may carry a provider prefix — `gemini:`/`groq:` route that rung through the
+ * provider's OWN .env keys (v1.1.0 multi-brain); `groq:llama-3.3-70b-versatile` etc.
+ * Unprefixed ids are OpenRouter rungs (Gemini/Claude ids included, same keys).
  * Any OpenRouter-accessible model id is a cloud rung (Gemini ids included — there is
  * no separate Gemini provider; gemini-* models are reached THROUGH OpenRouter, same
  * keys, same rotation). Entries prefixed `ollama:`/`local:` are the local rung.
@@ -46,8 +49,10 @@ function parsePriority(envValue, { cloudModel, ollamaModel }) {
   }
   for (const e of raw) {
     const m = /^(ollama|local)\s*:\s*(.+)$/i.exec(e);
-    if (m) push('ollama:' + m[2].trim(), 'ollama');
-    else push(e, 'openrouter');
+    if (m) { push('ollama:' + m[2].trim(), 'ollama'); continue; }
+    const g = /^(groq|gemini|google)\s*:\s*(.+)$/i.exec(e); // v1.1.0 sanctioned overflow providers
+    if (g) { push(g[2].trim(), g[1].toLowerCase() === 'google' ? 'gemini' : g[1].toLowerCase()); continue; }
+    push(e, 'openrouter');
   }
   if (!rungs.some((r) => r.provider === 'ollama')) push('ollama:' + ollamaModel, 'ollama'); // local rung always exists as the floor
   return rungs;
@@ -55,7 +60,8 @@ function parsePriority(envValue, { cloudModel, ollamaModel }) {
 
 function labelOf(id, provider) {
   if (provider === 'ollama') return 'local ' + String(id).replace(/^ollama:/, '').split('/').pop();
-  return String(id).split('/').pop();
+  const bare = String(id).split('/').pop();
+  return provider === 'openrouter' ? bare : bare + ' @' + provider;
 }
 
 class ModelRouter {
@@ -66,14 +72,16 @@ class ModelRouter {
    *  ollama    Ollama client (ping/url/model)
    *  net       { online }
    *  keyCount  () => number of usable OpenRouter keys (rotation ring size)
+ *  keyCountFor (provider) => number of usable keys for that provider (v1.1.0)
    *  audit/log sinks (optional), now injectable
    */
-  constructor({ env, settings, ollama, net, keyCount, audit, log, now } = {}) {
+  constructor({ env, settings, ollama, net, keyCount, keyCountFor: opts_keyCountFor, audit, log, now } = {}) {
     this.env = env || {};
     this.settings = settings || { data: {} };
     this.ollama = ollama || null;
     this.net = net || { online: true };
     this.keyCount = keyCount || (() => 0);
+    this.keyCountFor = typeof opts_keyCountFor === 'function' ? opts_keyCountFor : null;
     this.audit = audit || { write() {} };
     this.log = log || { write() {} };
     this.now = now || Date.now;
@@ -101,16 +109,24 @@ class ModelRouter {
     delete this._down[id];
   }
 
-  /** Cloud rungs in ladder order. A rung is usable when the ring has keys, the hub is online, and it isn't in a down window. */
+  keysFor(provider) {
+    if (this.keyCountFor) return this.keyCountFor(provider) || 0;
+    return provider === 'openrouter' ? (this.keyCount() || 0) : 0;
+  }
+
+  /** Cloud rungs in ladder order (any sanctioned provider). A rung is usable when ITS
+      provider ring has keys, the hub is online, and it isn't in a down window. */
   cloudState() {
-    const keys = this.keyCount() > 0;
     const online = !!this.net.online;
-    return this.ladder().filter((r) => r.provider === 'openrouter').map((r) => ({
-      ...r,
-      usable: keys && online && !this.isDown(r.id),
-      down: this.downState(r.id),
-      blockedBy: !keys ? 'no-keys' : !online ? 'offline' : this.isDown(r.id) ? 'down' : null,
-    }));
+    return this.ladder().filter((r) => r.provider !== 'ollama').map((r) => {
+      const keys = this.keysFor(r.provider) > 0;
+      return {
+        ...r,
+        usable: keys && online && !this.isDown(r.id),
+        down: this.downState(r.id),
+        blockedBy: !keys ? 'no-keys' : !online ? 'offline' : this.isDown(r.id) ? 'down' : null,
+      };
+    });
   }
 
   localRung() {
@@ -136,7 +152,10 @@ class ModelRouter {
     const from = lad.find((r) => r.id === fromId);
     const to = lad.find((r) => r.id === toId);
     if (!from || !to) return false;
-    return from.provider === 'openrouter' && to.provider === 'openrouter' && to.tier > from.tier;
+    // v1.1.0: dropping down the ladder is a downgrade whether it changes provider or not
+    // (openrouter host → gemini overflow is still less capable, still needs a yes).
+    if (from.provider === 'ollama' || to.provider === 'ollama') return false;
+    return to.tier > from.tier;
   }
 
   status(sess) {

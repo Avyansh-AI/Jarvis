@@ -5,6 +5,11 @@
  */
 process.env.PORT = '8093';
 process.env.OPENROUTER_BASE = 'http://127.0.0.1:8912';
+/* Pin the connectivity probe to the mock we control (same pattern as test-chaos:
+   "probe pinned local: the suite must not depend on WAN luck"). Without this, a
+   sandbox/CI without egress to the default open-meteo probe flips the hub into
+   offline-fallback and the cloud rotation path never runs. */
+process.env.MAX_NET_PROBE_URL = 'http://127.0.0.1:8912/probe';
 process.env.OPENROUTER_API_KEYS = 'bad-key-1,good-key-2,spare-key-3';
 // v1.0.7 canonical slots — the .env-only policy reads ONLY these; rotation under
 // simulated 429 rate-limiting is re-proven against exactly these three.
@@ -22,6 +27,7 @@ const attempts = [];
 const mock = http.createServer(async (req, res) => {
   let raw = '';
   for await (const c of req) raw += c;
+  if (req.url === '/probe') { res.writeHead(200); res.end('ok'); return; } // connectivity probe — not a key attempt
   const auth = req.headers.authorization || '';
   const key = auth.replace(/^Bearer /, '');
   attempts.push(key);

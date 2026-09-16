@@ -41,8 +41,9 @@
 
     <section class="card" aria-labelledby="s-keys">
       <h3 id="s-keys">OpenRouter Keys</h3>
-      <p class="desc">Rotating keys live exclusively in <code>.env</code> on the hub as <code>OPENROUTER_KEY_1</code>, <code>OPENROUTER_KEY_2</code>, <code>OPENROUTER_KEY_3</code> — they are never shown here and cannot be edited from any UI. Edit the file and restart the hub to change them. The boot preflight refuses to start if any of the three variables is missing.</p>
+      <p class="desc">Rotating keys live exclusively in <code>.env</code> on the hub as <code>OPENROUTER_KEY_1</code>, <code>OPENROUTER_KEY_2</code>, <code>OPENROUTER_KEY_3</code> — they are never shown here and cannot be edited from any UI. Since the multi-brain build the same rules govern the sanctioned overflow brains: <code>GROQ_KEY_1..n</code> (sub-agents + server voice) and <code>GEMINI_KEY_1..n</code> (fallback capacity). Edit the file and restart the hub. Boot refuses to start only if no provider has any key; a partial OpenRouter rotation boots with a loud warning naming the empty slots.</p>
       <div class="field"><label for="k-model">Model id (optional, overrides default)</label><input id="k-model" type="text" placeholder="anthropic/claude-sonnet-4-5"></div>
+      <p class="desc" id="keysBrains">Brains: checking…</p>
     </section>
 
     <section class="card" aria-labelledby="s-voice">
@@ -52,6 +53,7 @@
       <div class="field"><label for="f-pitch">Pitch</label><input id="f-pitch" type="range" min="0.6" max="1.5" step="0.05"></div>
       <div class="row"><button class="btn" id="b-testvoice">Test voice</button></div>
       <div class="row" style="margin-top:12px"><span class="desc" style="flex:1">Text-only mode (no sound)</span><span class="switch"><input id="t-textonly" type="checkbox"><span class="track"></span></span></div>
+      <div class="row"><span class="desc" style="flex:1">Server voice (hub-synthesized Orpheus preset; falls back to device voices if off)</span><span class="switch"><input id="t-servertts" type="checkbox"><span class="track"></span></span></div>
       <div class="row"><span class="desc" style="flex:1">Voice match enrolled (experimental)</span><span class="row" style="gap:6px"><button class="btn ghost" id="b-delvoice" type="button">Forget voice</button><button class="btn ghost" id="b-enroll" title="Best-effort voice check, not a certified security system">Enroll</button></span></div>
       <p class="desc" id="enrollStatus">Voice verification is best-effort — not a certified security system.</p>
     </section>
@@ -210,6 +212,7 @@
   $('f-rate').value = MAX.LS.get('rate', 1);
   $('f-pitch').value = MAX.LS.get('pitch', 1);
   $('t-textonly').checked = MAX.LS.get('textOnly', false);
+  $('t-servertts').checked = MAX.LS.get('serverTts', false);
   $('t-contrast').checked = MAX.LS.get('highContrast', false);
   $('t-motion').checked = MAX.LS.get('reducedMotion', false);
   $('t-notify').checked = MAX.LS.get('notifications', false);
@@ -221,12 +224,21 @@
   $('t-jarvis').checked = MAX.LS.get('jarvis', true); // Jarvis fork: persona is the product voice, on unless disabled
   $('t-jarvis').onchange = () => { MAX.LS.set('jarvis', $('t-jarvis').checked); if ($('t-jarvis').checked) try { sessionStorage.removeItem('maxGreeted'); } catch {} };
   $('t-textonly').onchange = () => MAX.LS.set('textOnly', $('t-textonly').checked);
+  $('t-servertts').onchange = () => MAX.LS.set('serverTts', $('t-servertts').checked);
   $('f-voice').onchange = () => MAX.LS.set('voice', $('f-voice').value);
   $('f-rate').onchange = () => MAX.LS.set('rate', parseFloat($('f-rate').value));
   $('f-pitch').onchange = () => MAX.LS.set('pitch', parseFloat($('f-pitch').value));
   $('f-token').onchange = () => MAX.LS.set('token', $('f-token').value.trim());
 
-  /* OpenRouter keys are .env-only (v1.0.7) — this page only surfaces the model id. */
+  /* Keys are .env-only (v1.0.7; multi-provider since v1.1.0) — this page surfaces the
+     model id and READ-ONLY provider key counts (counts only; never values). */
+  MAX.get('/api/health').then((h) => {
+    const p = (h && h.providers) || {}; const t = (h && h.tts) || {};
+    const n = (x) => x > 0 ? String(x) : '0';
+    $('keysBrains').textContent = 'Brains live: OpenRouter ' + n(p.openrouter) + '/3 slots · Groq ' + n(p.groq) +
+      ' (sub-agents + voice) · Gemini ' + n(p.gemini) + ' (overflow) · server voice ' + (t.live ? 'on' : 'off') +
+      (t.model ? ' (' + t.model + ')' : '');
+  }).catch(() => { $('keysBrains').textContent = 'Brains: hub unreachable right now.'; });
   async function loadKeys() {
     const d = await MAX.get('/api/keys');
     $('k-model').value = d.model || '';
@@ -263,7 +275,8 @@
     skills.forEach((s) => {
       const li = document.createElement('li');
       li.style.display = 'flex'; li.style.justifyContent = 'space-between'; li.style.alignItems = 'center';
-      li.innerHTML = `<span>${s.label}${s.sensitive ? ' 🔒' : ''} <span class="desc">v${s.version}</span></span>`;
+      const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      li.innerHTML = `<span>${esc(s.label)}${s.sensitive ? ' 🔒' : ''} <span class="desc">v${esc(s.version)}</span>${s.status ? `<br><span class="desc">${esc(s.status)}</span>` : ''}</span>`;
       const sw = document.createElement('span');
       sw.className = 'switch';
       sw.innerHTML = `<input type="checkbox" ${s.enabled ? 'checked' : ''} aria-label="Enable ${s.label}"><span class="track"></span>`;

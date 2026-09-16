@@ -69,6 +69,24 @@ const diag = { line: 'Weather failed — upstream 500.', count: 2, remembered: t
   const reassure = p.promptSection(p.select({ sentiment: 'frustrated', tone: 0.5, anchors: { diag } }), {});
   ok('prompt: reassure register quotes its REAL anchor for grounding', /Register for THIS turn/.test(reassure) && reassure.includes('upstream 500'));
   ok('prompt: register instruction orders plain facts FIRST around the anchor', /deliver the facts plainly/i.test(reassure));
+
+  /* ---- v1.0.12 butler persona spec (owner-provided): identity + behavior rules ---- */
+  ok('persona [JARVIS fork]: British-butler identity — polite-formal, addresses "sir" (name only for warmth), unimpressed, loyal-underneath',
+    /butler/i.test(VOICE.persona) && /"sir"/.test(VOICE.persona) && /Avyansh.*only occasionally/i.test(VOICE.persona)
+    && /no longer impressed/i.test(VOICE.persona) && /Loyal/i.test(VOICE.persona) && /Might I suggest/i.test(VOICE.persona));
+  ok('persona: wit roasteth the DECISION, never the user; one line, then move on; no gloating',
+    /roast the user’s decisions, never the user/.test(VOICE.witStyle) && /move on like nothing \s*happened/.test(VOICE.witStyle)
+    && /never cruel/i.test(VOICE.witStyle) && /seen this before/i.test(VOICE.witStyle));
+  ok('prompt: garnish-not-the-meal rule rides EVERY prompt (answer/action first, no announced jokes)',
+    /garnish, not the meal/i.test(composed) && /deliver the actual answer or action first/i.test(composed));
+  ok('prompt: stakes rule — wit SUSPENDED ENTIRELY for safety/money/irreversible/confirmation/distress, in every register',
+    /suspended ENTIRELY/.test(composed) && /safety, money, an irreversible action, a confirmation, or real distress/i.test(composed));
+  ok('prompt: concise spoken default (no lists/headers unless structure is wanted) + no self-intro theatrics',
+    /no lists, headers, or markup/i.test(composed) && /never introduce yourself/i.test(composed));
+  ok('persona: identity lives ONLY in the VOICE block (lockstep) — a foreign voice inherits the rules but none of the butler',
+    (() => { const other = new Persona({ id: 'x', persona: 'some other character', witStyle: 'w', encourageStyle: 'e', reassureStyle: 'r', honestAnswer: 'h', acknowledge: 'a' });
+      const pr = other.promptSection(null, {});
+      return !/butler|Avyansh|second-in-command/i.test(pr) && /garnish, not the meal/i.test(pr) && /suspended ENTIRELY/.test(pr); })());
 }
 
 /* ---- deterministic close: reassure only, anchored + caller-solid, appended last ---- */

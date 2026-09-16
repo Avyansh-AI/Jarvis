@@ -12,8 +12,8 @@
   body { display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; padding: 24px; min-height: 100vh; }
   .stage { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; }
   .dock { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
-  .chat { display: none; flex-direction: column; align-items: center; gap: 10px; width: min(560px, 100%); }
-  .chat.open { display: flex; }
+  /* Text chat is a first-class surface (v1.1.1): always mounted under the ring. */
+  .chat { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(560px, 100%); }
   .chat .composer { display: flex; gap: 8px; width: 100%; }
   .chat input[type=text] { flex: 1; font: inherit; font-size: 14px; font-weight: 600; color: var(--ink); background: rgba(4, 16, 31, 0.85); border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; outline: none; }
   .chat input[type=text]:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(60,224,255,0.16); }
@@ -75,21 +75,15 @@
 
   <div class="dock">
     <button class="btn ghost" id="wakeBtn" aria-pressed="false" title="Hands-free mode">Hey&nbsp;Jarvis&nbsp;○</button>
-    <button class="btn ghost" id="typeBtn" aria-pressed="false" title="Text-only mode">Type&nbsp;instead</button>
     <button class="btn ghost" id="visionBtn" aria-pressed="false" title="Camera vision (opt-in, opens Vision page)">Vision</button>
-    <button class="btn ghost" id="hudBtn" aria-pressed="true" title="HUD widget layer (weather, time, devices, activity)">HUD&nbsp;●</button>
   </div>
-  <div class="hint">Tap or press Enter to talk · camera/mic stay off until you enable them</div>
+  <div class="hint">Tap the ring or press Enter to talk · type below to chat · camera/mic stay off until you enable them</div>
 </div>
 
-<!-- Jarvis HUD widget layer: modular glass panels arranged around the ring.
-     Data comes from existing public APIs only (see js/widgets.js). -->
-<div class="hud-layer" id="hudLayer" aria-label="Status widgets">
-  <div class="hud-widget tl" data-widget="weather" role="status" aria-label="Weather"></div>
-  <div class="hud-widget tr" data-widget="clock" role="status" aria-label="Date and time"></div>
-  <div class="hud-widget bl" data-widget="activity" role="status" aria-label="Recent activity and notifications"></div>
-  <div class="hud-widget br" data-widget="devices" role="status" aria-label="Quick device controls"></div>
-</div>
+<!-- (v1.1.1) The HUD widget layer was removed from the main page by owner
+     request — it degraded to empty shells without live data feeds. The panel
+     styling + js/widgets.js remain in the system for other surfaces; text
+     chat below is now the always-available companion to the voice ring. -->
 
 <div class="card verify-drawer" id="verifyDrawer" role="alertdialog" aria-labelledby="verifyTitle">
   <h3 id="verifyTitle">Voice verification</h3>
@@ -106,7 +100,6 @@
 
 <script src="js/common.js"></script>
 <script src="js/wakeword.js"></script>
-<script src="js/widgets.js"></script>
 <script>
 (() => {
   const ringWrap = document.getElementById('ringWrap');
@@ -138,6 +131,11 @@
     STATES.speaking.line = '';
   }
   let state = 'standby';
+  /* Interruption-aware playback (Brahma-Lite parity): while a LONG utterance
+     (the morning briefing, "catch me up") is being read aloud, the next fresh
+     command interrupts it mid-speech; short answers always finish (self-echo
+     and cut-off-reply risk not worth it). Set from res.long by handleResponse. */
+  let interruptibleSpeech = false;
   let alertActive = false;
   let errorTimer = null;
 
@@ -239,6 +237,7 @@
   let replyWatchdog = null;
   async function sendUtterance(text, extra = {}) {
     if (!text.trim()) return;
+    MAX.stopSpeaking(); // a new command always interrupts whatever is still playing
     setState('thinking');
     if (wsOpen) {
       try { ws.send(JSON.stringify({ type: 'utterance', text, ...extra })); }
@@ -280,8 +279,8 @@
     addBubble('max', res.say, res.cards);
     speak(stripCodeForSpeech(res.say), {
       pacing: res.pacing,
-      onstart: () => setState('speaking'),
-      onend: () => { if (state === 'speaking') setState('standby', 'All set. Here if you need me.'); },
+      onstart: () => { setState('speaking'); interruptibleSpeech = res.long === true; },
+      onend: () => { interruptibleSpeech = false; if (state === 'speaking') setState('standby', 'All set. Here if you need me.'); },
     });
     if (!('speechSynthesis' in window) || MAX.LS.get('textOnly', false)) {
       setState('standby', res.say);
@@ -671,8 +670,13 @@
       wakeRec.onresult = (e) => {
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const said = e.results[i][0].transcript.toLowerCase();
-          if (WakeWord.match(said).wake && state === 'standby') {
+          // Barge-in: a wake word interrupts a LONG speaking utterance (the
+          // briefing) mid-speech — Brahma-Lite parity. 'alert' (SOS) is
+          // deliberately never interrupted by voice; short replies never
+          // arm the interrupt window (self-echo guard).
+          if (WakeWord.match(said).wake && (state === 'standby' || (state === 'speaking' && interruptibleSpeech))) {
             MAX.notify('Jarvis', 'Wake word heard');
+            if (state === 'speaking') { MAX.stopSpeaking(); setState('standby'); } // stop TTS even if the mic path then fails
             transcriptLine.textContent = '';
             try { wakeRec.stop(); } catch {}
             startListening();
@@ -809,32 +813,12 @@
 
   /* ---------- dock ---------- */
   document.getElementById('wakeBtn').onclick = () => setWake(!wakeOn);
-  /* HUD widget layer: easy to hide (persisted); the ring stays the focus. */
-  const hudBtn = document.getElementById('hudBtn');
-  function setHud(on) {
-    document.body.classList.toggle('widgets-hidden', !on);
-    MAX.LS.set('hud', on);
-    hudBtn.innerHTML = on ? 'HUD&nbsp;●' : 'HUD&nbsp;○';
-    hudBtn.setAttribute('aria-pressed', on);
-  }
-  hudBtn.onclick = () => setHud(document.body.classList.contains('widgets-hidden'));
-  setHud(MAX.LS.get('hud', true));
-  /* the widget layer is decorative — the page must NEVER depend on it. If
-     js/widgets.js failed to load (e.g. hub offline + not yet SW-cached), an
-     unguarded mountAll() would kill this whole script. */
-  if (window.MAX && MAX.widgets && MAX.widgets.mountAll) {
-    try { MAX.widgets.mountAll(); } catch { /* widgets optional — page continues */ }
-  } else {
-    const l = document.getElementById('hudLayer');
-    if (l) l.style.display = 'none';
-    hudBtn.style.display = 'none';
-  }
-  document.getElementById('typeBtn').onclick = () => {
-    const open = chatPanel.classList.toggle('open');
-    document.getElementById('typeBtn').setAttribute('aria-pressed', open);
-    if (open) chatInput.focus();
-  };
-  if (MAX.LS.get('textOnly', false)) chatPanel.classList.add('open');
+  /* (v1.1.1) HUD widget layer + "Type instead" toggle removed by owner request:
+     the page lost its focus to empty pill shells when feeds were down, and the
+     text chat deserves better than a toggle. The composer is now always mounted;
+     mic failures still reveal it via chatPanel.classList.add('open') (no-op now,
+     kept for the SW-cached old copies of this page). */
+  chatInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') chatInput.blur(); });
 
   /* proactive nudge on load (quiet, once) */
   MAX.get('/api/proactive').then((items) => {
