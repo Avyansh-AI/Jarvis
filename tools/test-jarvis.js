@@ -52,13 +52,21 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
     theme.includes('.hud-widget') && theme.includes('body.widgets-hidden .hud-layer'));
 }
 
-/* J4: widget layer on the main page */
+/* J4 (RE-PIN v1.1.1 — owner directive): the HUD widget layer was REMOVED from
+   the main page (empty pill shells when feeds were down stole the focus); the
+   text chat is promoted to an always-mounted first-class surface. The widget
+   machinery itself stays in the tree (js/widgets.js + theme styles) — this pin
+   guards the main page only. */
 {
   const idx = read('web/index.html');
-  const kinds = [...idx.matchAll(/data-widget="([a-z]+)"/g)].map((m) => m[1]);
-  ok('J4: index.html mounts all 4 HUD widgets around the ring + hide toggle + shared script',
-    ['weather', 'clock', 'devices', 'activity'].every((k) => kinds.includes(k))
-      && idx.includes('id="hudBtn"') && idx.includes('js/widgets.js') && idx.includes('MAX.widgets.mountAll()'));
+  ok('J4: index.html has NO HUD layer (no data-widget mounts, no hud toggle, no widgets.js script tag)',
+    !/data-widget="/.test(idx) && !/id="hudBtn"/.test(idx) && !/<script src="js\/widgets\.js">/.test(idx));
+  ok('J4: text chat is first-class — panel defaults to flex (no toggle gate), composer + log present',
+    /\.chat \{ display: flex;/.test(idx) && idx.includes('id="chatInput"') && idx.includes('id="chatLog"') && idx.includes('id="chatForm"'));
+  ok('J4: no "Type instead" toggle remains and Enter-to-send path is intact',
+    !/id="typeBtn"/.test(idx) && /chatForm\.addEventListener\('submit'/.test(idx) && /sendUtterance\(t\)/.test(idx));
+  ok('J4: voice replies still land in the same chat log (single transcript for both input modes)',
+    /addBubble\('max', res\.say, res\.cards\)/.test(idx));
 }
 
 /* J5: widgets only use pre-existing public APIs */

@@ -1,6 +1,6 @@
 {
   "name": "jarvis-ai",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Jarvis \u2014 personal AI assistant (dark-HUD fork of the MAX AI codebase; full feature parity, independent product): hub service, web companion (PWA), and ESP32 satellite firmware.",
   "private": true,
   "main": "hub/server.js",

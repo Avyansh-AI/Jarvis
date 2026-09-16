@@ -4,6 +4,28 @@
 > under the original product name **MAX AI**; this fork continues as **Jarvis**
 > from v1.0.0 onward. History below the v1.0.0 entry is inherited verbatim.
 
+## v1.1.1 — Main page: HUD widget layer removed, text chat made first-class (2026-09-16)
+
+Owner request (screenshot: four empty pill shells). The HUD widget layer on the
+voice page degraded to empty outlines whenever its data feeds were unavailable
+— decoration that reads as breakage. It is REMOVED from `web/index.html`
+(widget mounts, `#hudBtn` toggle, `js/widgets.js` script tag); the widget
+machinery and theme styles remain untouched in the tree.
+
+**Text chat is no longer a hidden toggle.** The composer panel (input + bubble
+log, both fed through the existing `/api/utterance` pipeline — voice and typed
+turns share one transcript) now renders always; the "Type instead" dock button
+and its gate are gone, and the hint line advertises typing. Mic-unavailable
+states still reveal the panel defensively (their `open` class is a no-op now —
+kept for stale SW-cached copies).
+
+**Test re-pin (flagged):** J12-era J4 "index.html mounts all 4 HUD widgets +
+hide toggle + shared script" is replaced by four pins guarding the NEW
+contract — no HUD layer on the main page, chat always mounted, Enter-to-send
+intact, single shared transcript. No other suite touched (J3's theme-token
+pins and the widgets.js API checks still pass as written). No security,
+voice-verification, or dispatch logic changed.
+
 ## v1.1.0 — Multi-brain: Host + silent sub-agents + overflow fallback + server voice (2026-09-16)
 
 The owner's delivered architecture is now the product: one persona, a small
