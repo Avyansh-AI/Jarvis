@@ -88,6 +88,14 @@ change it in Settings → Hub timezone (applies instantly, no restart).
   rollbacks, drift guardrails, and a permanent "hands off" rule for
   auth/locks/payments. Everything is visible and editable under Settings →
   **What Jarvis has learned about me**; see `PERSONALIZATION.md`.
+- **Voice & temperament:** JARVIS speaks like a world-class British butler who
+  has seen it all — unfailingly polite, dry, never ruffled; "sir" by default,
+  name only for warmth. The wit is garnish, never the meal: it is grounded in
+  something real or silent (no filler empathy, no invented feelings), jokes
+  roast decisions rather than people, and it is **suspended entirely** for
+  safety, money, irreversible actions, confirmations, or real distress.
+  Personality is a delivery layer only — it can never mint actions, soften a
+  warning, or touch a gate (`hub/persona.js`, pinned by `tools/test-persona.js`).
 - **Brand assets without code changes:** drop `assets/logo.png` and/or
   `assets/background.png` into the repo — every page picks them up
   automatically; delete them and the defaults return (jailed `/assets/`

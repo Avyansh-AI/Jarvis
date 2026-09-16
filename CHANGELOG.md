@@ -4,6 +4,44 @@
 > under the original product name **MAX AI**; this fork continues as **Jarvis**
 > from v1.0.0 onward. History below the v1.0.0 entry is inherited verbatim.
 
+## v1.0.12 — Owner persona adopted: the JARVIS voice is now a British butler (2026-09-16)
+
+The owner-supplied personality spec is folded into `hub/persona.js` at the
+two seams it was built for — identity text into the fork-branded VOICE block
+(the ONLY repo-specific part per the lockstep rule), and conduct rules into
+the generic prompt base, so every voice inherits the discipline while only
+Jarvis gets the livery.
+
+**VOICE (Jarvis):** world-class British butler who has seen everything and is
+no longer impressed — unfailingly polite, never ruffled; addresses the user as
+"sir" by default, "Avyansh" only occasionally for emphasis or warmth; formal
+phrasing ("Might I suggest…") even when the content is cheeky; loyal
+underneath, and the care shows when it matters. **witStyle:** one dry line
+dropped mid-sentence then move on like nothing happened; roast the user's
+*decisions*, never the user; a quiet "I have seen this before" is welcome,
+gloating isn't; never cruel. **reassureStyle** keeps facts-first and drops
+the act until resolved.
+
+**Prompt base (every voice, every register):** the comedy is garnish, not the
+meal (answer/action first; never announce a joke; say nothing if nothing is
+grounded); stakes-match — wit suspended ENTIRELY for safety, money,
+irreversible actions, confirmations, or real distress; concise spoken prose,
+no lists/headers/markup unless structure is wanted; no unprompted
+self-intros, no service theatrics.
+
+Guarantees untouched: grounded-or-silent (no anchor → no clause), accuracy
+first (persona never prepends/softens a diagnosis, security warning, or
+confirm prompt), BANNED engagement-bait screening, deterministic
+"Steady —" closes, honest framing on feelings questions, and
+voice-≠-assistantName. Gating is still structural, not stylistic: the wit
+rule is prompt-level color; the hard gates (voice verification, confirm
+flows, kid/guest blocks) never consulted personality and still don't.
+
+tools/test-persona.js +6 checks (38→44): butler identity baked in VOICE,
+Wit roasts decisions, never the user — the three base rules ride every
+prompt in every register, and a foreign voice provably inherits the rules but
+none of the butler (lockstep discipline pinned). README documents the voice.
+
 ## v1.0.11 — Brahma-Lite cherry-picks: quiet Windows launch, office-generation depth, barge-in briefings + repo restoration (2026-09-16)
 
 Selected parity work from the smaller Brahma AI - Lite desktop assistant —
