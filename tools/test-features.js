@@ -27,8 +27,9 @@
  *      native) + offline voice intents + Settings capability line
  * 18.  interruption-aware briefing playback (long:true flag + barge-in window
  *      on the web client + Remote stop control)
- * 15. every new skill registered; theme still cream/coral; no LLM-provider
- *     strings crept in (Gemini etc. must NOT appear in hub code)
+ * 15. every new skill registered; theme still cream/coral; provider hygiene =
+ *     v1.1.0 sanctioned-origin allow-set (openrouter/groq/generativelanguage
+ *     + loopback — no other LLM provider may be called from hub code)
  */
 const fs = require('fs');
 const os = require('os');
@@ -351,8 +352,97 @@ const ok = (n, c) => { if (c) { pass++; console.log('ok  ' + n); } else { fail++
   const names = skills.map((s) => s.name);
   ok('registry: all six new skills loaded alongside the original 18',
     ['desktop', 'browse', 'create', 'flights', 'youtube', 'discord'].every((n) => names.includes(n)) && names.length >= 24);
-  const hubSrc = ['hub/server.js', 'hub/orchestrator.js', 'hub/keyring.js'].map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
-  ok('provider hygiene: no Gemini/other LLM-provider code crept into the hub', !/gemini|anthropic\.com|api\.openai\.com/i.test(hubSrc));
+  const hubSrc = ['hub/server.js', 'hub/orchestrator.js', 'hub/keyring.js', 'hub/models.js', 'hub/skills/delegate.js'].map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
+  /* v1.1.0 RE-PIN (owner's multi-brain architecture supersedes the v1.0.7
+     single-provider rule): the doctrine is now a CLOSED PROVIDER SET. Every
+     https:// origin in hub sources must be sanctioned — OpenRouter (host),
+     Groq (sub-agents + voice), Google's OpenAI-compatible endpoint (overflow) —
+     or loopback. Any other LLM provider called directly from hub code is a bug.
+     Key-shaped literals remain banned (test-physical owns that scan). */
+  const origins = [...hubSrc.matchAll(/https:\/\/([a-z0-9.-]+)/gi)].map((m) => m[1]);
+  const SANCTIONED = /^(openrouter\.ai|api\.groq\.com|generativelanguage\.googleapis\.com|127\.0\.0\.1|localhost)$/i;
+  ok('provider hygiene (v1.1.0 allow-set): hub sources reach only sanctioned provider origins',
+    origins.length > 0 && origins.every((o) => SANCTIONED.test(o)));
+  ok('provider hygiene: no rogue anthropic/openai direct endpoints',
+    !/anthropic\.com|api\.openai\.com/i.test(hubSrc));
+  /* ---- 19. multi-brain wiring (v1.1.0): silent sub-agents + server voice ---- */
+  {
+    for (let n = 1; n <= 3; n++) { process.env['GROQ_KEY_' + n] = ''; } // hermetic: no ambient Groq slots
+    const dlg = require('../hub/skills/delegate.js');
+    ok('delegate: registered as a tool-only skill — one delegate_task surface, no voice intents',
+      names.includes('delegate') && dlg.tools.length === 1 && dlg.tools[0].name === 'delegate_task' && !dlg.intents);
+    ok('delegate: honest unavailability (no GROQ keys) is a terse status line the Host can relay — never a throw',
+      /^\[sub-agent unavailable:.*Groq keys/.test((await dlg.tools[0].run({ task: 'parse this: a=1' })).text || ''));
+    // mock Groq proves the happy path end to end: .env-only key, Bearer rotation, exact-format discipline
+    const { createServer } = require('http');
+    const seen = [];
+    const mock = createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        seen.push({ auth: req.headers.authorization, body: JSON.parse(raw || '{}') });
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ choices: [{ message: { content: '  TASK-DONE  ' } }] }));
+      });
+    });
+    await new Promise((r) => mock.listen(0, '127.0.0.1', r));
+    process.env.GROQ_BASE = 'http://127.0.0.1:' + mock.address().port;
+    process.env.GROQ_KEY_1 = 'gk-test-1';
+    delete require.cache[require.resolve('../hub/skills/delegate.js')];
+    const dlg2 = require('../hub/skills/delegate.js');
+    const done = await dlg2.tools[0].run({ task: 'extract the year from: born 1997. Answer with the bare four digits.' });
+    ok('delegate: Groq round-trip — Bearer from GROQ_KEY slot, temperature 0, reply trimmed to the Host',
+      done.text === 'TASK-DONE' && seen.length === 1 && seen[0].auth === 'Bearer gk-test-1' && seen[0].body.temperature === 0);
+    ok('delegate: availability line is count-only (Settings masking doctrine everywhere)', /1 Groq key/.test(dlg2.status()));
+    mock.close();
+    delete process.env.GROQ_KEY_1; delete process.env.GROQ_BASE;
+    delete require.cache[require.resolve('../hub/skills/delegate.js')];
+    for (let n = 1; n <= 3; n++) delete process.env['GROQ_KEY_' + n];
+
+    const ttsRes = await fetch('http://127.0.0.1:8114/api/tts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'good evening' }) });
+    ok('server voice: unconfigured hub answers 503 with a .env pointer (loud, never silent)',
+      ttsRes.status === 503 && /TTS_MODEL/.test(await ttsRes.text()));
+    const h = await api('/api/health');
+    ok('health: provider counts + tts flag surface — counts only, never key material',
+      h.providers && typeof h.providers.openrouter === 'number' && typeof h.providers.groq === 'number' && h.tts && h.tts.live === false);
+    const setHtml = fs.readFileSync(path.join(ROOT, 'web', 'settings.html'), 'utf8');
+    ok('settings: read-only brains line + server-voice switch; still ZERO key inputs',
+      setHtml.includes('keysBrains') && setHtml.includes('t-servertts') && !/id="k-new|id="b-addkey|id="keysList"/.test(setHtml));
+    const cjs = fs.readFileSync(path.join(ROOT, 'web', 'js', 'common.js'), 'utf8');
+    ok('voice client: server TTS attempted first with browser fallback + barge-in cancels BOTH paths',
+      cjs.includes('/api/tts') && cjs.includes('_srvOk = false; _browserSpeak') && cjs.includes('_srvAudio.pause()'));
+
+    // second, TTS-live hub against a mock speech engine — proves the real route + ring
+    const audioMock = createServer((req, res) => {
+      let raw = ''; req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        const b = JSON.parse(raw || '{}');
+        if (/Bearer gk-t/.test(req.headers.authorization || '') && b.model === 'orpheus-test' && b.input) {
+          res.writeHead(200, { 'content-type': 'audio/mpeg' }); res.end(Buffer.from('FAKE-AUDIO'));
+        } else { res.writeHead(400).end('{}'); }
+      });
+    });
+    await new Promise((r) => audioMock.listen(0, '127.0.0.1', r));
+    const { spawn } = require('child_process');
+    const hub2 = spawn(process.execPath, ['hub/server.js'], {
+      cwd: ROOT, encoding: 'utf8',
+      env: { ...process.env, PORT: '8119', MAX_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'max-ttshub-')), JARVIS_ALLOW_KEYLESS: '1',
+        OPENROUTER_KEY_1: '', OPENROUTER_KEY_2: '', OPENROUTER_KEY_3: '', OPENROUTER_API_KEY: '', OPENROUTER_API_KEYS: '',
+        GROQ_KEY_1: 'gk-t', TTS_MODEL: 'orpheus-test', TTS_BASE: 'http://127.0.0.1:' + audioMock.address().port },
+    });
+    let ttsOk = null;
+    for (let i = 0; i < 60 && !ttsOk; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      ttsOk = await fetch('http://127.0.0.1:8119/api/tts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'very good, sir' }) }).catch(() => null);
+    }
+    const audioBytes = ttsOk && ttsOk.ok ? new TextDecoder().decode(await ttsOk.arrayBuffer()) : '';
+    const h2 = await fetch('http://127.0.0.1:8119/api/health').then((r) => r.json()).catch(() => ({}));
+    ok('server voice: configured hub streams audio through the Groq ring and health advertises tts.live',
+      ttsOk && ttsOk.status === 200 && ttsOk.headers.get('content-type') === 'audio/mpeg' && audioBytes === 'FAKE-AUDIO' && h2.tts && h2.tts.live === true);
+    if (ttsOk && ttsOk.body) { try { await ttsOk.body.cancel(); } catch {} }
+    hub2.kill('SIGKILL'); audioMock.close();
+  }
+
   const theme = fs.readFileSync(path.join(ROOT, 'web', 'css', 'theme.css'), 'utf8');
   ok('theme [JARVIS fork]: dark HUD palette everywhere (cyan tokens + scan field, cream/coral gone from theme.css)',
     theme.includes('--cyan') && theme.includes('--hud-900') && !/brahma|--cream|--coral/i.test(theme));

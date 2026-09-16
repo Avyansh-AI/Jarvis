@@ -6,8 +6,9 @@
  * and the invariants those flows must never weaken.
  *
  * Proves:
- *  ladder:    MODEL_PRIORITY parsing (Gemini ids are OpenRouter rungs — there is no
- *             separate Gemini provider), default ladder, ollama floor, dedup/cap
+ *  ladder:    MODEL_PRIORITY parsing (bare ids = OpenRouter rungs; v1.1.0 adds
+ *             groq:/gemini: provider prefixes for the sanctioned overflow brains),
+ *             default ladder, ollama floor, dedup/cap
  *  router:    down marks drive bestCloud; outageId stability; degrade detection is
  *             exactly "lower CLOUD tier" (key rotation and the local floor never ask)
  *  localproc: already-up / spawn-and-wait / ENOENT / exit-code / cooldown /
@@ -70,6 +71,36 @@ function makeOrch({ upResult = { ok: false, reason: 'no binary' }, priority = 't
       messy.filter((r) => r.id === 'a-model').length === 1 && messy[messy.length - 1].provider === 'ollama');
     const noLocal = parsePriority('a, b', { cloudModel: 'x', ollamaModel: 'm' });
     ok('ladder: the local floor always exists even if omitted', noLocal[noLocal.length - 1].provider === 'ollama');
+  }
+
+  /* ---------- parsePriority: v1.1.0 sanctioned provider prefixes ---------- */
+  {
+    const m = parsePriority('openai/gpt-oss-120b, gemini:gemini-3.1-flash, groq:llama-3.3-70b-versatile, google:gemini-2.5-pro, ollama:llama3.1', { cloudModel: 'x', ollamaModel: 'm' });
+    ok('ladder (v1.1.0): groq:/gemini:/google: prefix tags the provider, strips to the bare id, ordering + tiers kept',
+      m.length === 5 && m[0].provider === 'openrouter' && m[1].provider === 'gemini' && m[1].id === 'gemini-3.1-flash' &&
+      m[2].provider === 'groq' && m[2].id === 'llama-3.3-70b-versatile' && m[3].provider === 'gemini' && m[4].provider === 'ollama');
+    const bare = parsePriority('llama-3.3-70b-versatile, ollama:llama3.1', { cloudModel: 'x', ollamaModel: 'm' });
+    ok('ladder: UNPREFIXED ids remain OpenRouter rungs (default never silently shifts to an overflow provider)',
+      bare[0].provider === 'openrouter' && bare[0].id === 'llama-3.3-70b-versatile');
+  }
+
+  /* ---------- v1.1.0: per-provider key gating + bases + cross-provider degrade ---------- */
+  {
+    const counts = { openrouter: 0, groq: 6, gemini: 0 };
+    const r = new ModelRouter({ env: { MODEL_PRIORITY: 'top, gemini:flashy, groq:qwen3-8-27b' }, settings: { data: {} }, net: { online: true }, keyCount: () => 0, keyCountFor: (p) => counts[p] || 0 });
+    const cs = r.cloudState();
+    ok('gating (v1.1.0): a rung is usable by ITS provider\'s ring alone — keyless OpenRouter host does not block a keyed Groq rung',
+      cs[0].blockedBy === 'no-keys' && cs[1].blockedBy === 'no-keys' && cs[2].usable === true);
+    ok('gating: bestCloud walks past keyless providers to the first rung whose own ring can answer',
+      r.bestCloud() && r.bestCloud().id === 'qwen3-8-27b');
+    ok('degrade rule (v1.1.0): moving DOWN the cloud ladder asks even across providers; moving up never does',
+      r.needsDegradeConfirm('flashy', 'qwen3-8-27b') === true && r.needsDegradeConfirm('qwen3-8-27b', 'flashy') === false);
+    const rr = new ModelRouter({ env: { MODEL_PRIORITY: 'top, gemini:flashy, ollama:m' }, settings: { data: {} }, net: { online: true }, keyCount: () => 1, keyCountFor: () => 1 });
+    ok('degrade rule: the ollama floor stays EXEMPT from the cloud confirm (privacy move, not a capability ask)',
+      rr.needsDegradeConfirm('top', 'ollama:m') === false && rr.needsDegradeConfirm('flashy', 'ollama:m') === false);
+    ok('bases (v1.1.0): sanctioned trio hardcoded as defaults, each env-overridable (test hooks), OpenAI-compatible shape',
+      Orchestrator.baseFor('openrouter') === 'https://openrouter.ai/api/v1' && Orchestrator.baseFor('groq') === 'https://api.groq.com/openai/v1' &&
+      Orchestrator.baseFor('gemini') === 'https://generativelanguage.googleapis.com/v1beta/openai');
   }
 
   /* ---------- ModelRouter health/best ---------- */

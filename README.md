@@ -70,14 +70,15 @@ change it in Settings → Hub timezone (applies instantly, no restart).
   It's a deterministic local intent (`hub/skills/terminal.js`) that never
   goes through the LLM, and it is the *only* programmatic path to the
   dashboard — no boot auto-launch, no other trigger (regression-tested).
-- **OpenRouter key rotation:** put up to 3 keys in `.env`
-  (`OPENROUTER_API_KEY`, `OPENROUTER_API_KEYS` comma-list) or Settings →
-  OpenRouter Keys. On a rate-limit/rejection the active key cools down and
-  the next one takes over **mid-conversation**; rotations are logged as
-  `llm.key.fail` events (index only — key values are never logged). These
-  are the only LLM credentials in the system; everything else (Discord bot
-  token, HA token, flights key) lives under Settings → **Integrations** as
-  plainly-labeled *service credentials*.
+- **Key rotation across the sanctioned brains (v1.1.0):** keys live **only in
+  `.env`** — `OPENROUTER_KEY_1..3` (host), `GROQ_KEY_1..n` (sub-agents + server
+  voice), `GEMINI_KEY_1..n` (overflow). No Settings-UI entry, no legacy aliases;
+  every surface shows *counts*, never values. On a rate-limit/rejection the
+  active key cools down and the next one takes over **mid-conversation**;
+  rotations are logged as `llm.key.fail` events (index only — key values are
+  never logged). These are the only LLM credentials in the system; everything
+  else (Discord bot token, HA token, flights key) lives under Settings →
+  **Integrations** as plainly-labeled *service credentials*.
 - **GitHub integration (v0.11):** repos, files, commits, issues, PRs incl.
   diffs, CI status, notifications → your attention feed — as conversational
   reads. Every write (issue/comment/PR/review/merge/single-file commit) is
@@ -147,13 +148,20 @@ every screen, and full keyboard/screen-reader-friendly markup.
 
 ## Brains, fallbacks, privacy
 
-**Cloud path**: OpenRouter function-calling over the 17 skills. Keys are
-managed in **Settings → OpenRouter Keys** (add/remove, live cooldown dots) or
-via `.env` (`OPENROUTER_API_KEYS=k1,k2,...`) — UI-managed keys win, `.env` is
-the fallback and auto-seeds the first UI add. The hub rotates round-robin with
-automatic failover (401/402/403 dead-skip ~30 min, 429/5xx soft-skip ~5 min);
-keys are stored encrypted, shown masked (`sk-or-v1-012…e392`), and never logged.
-Model override in Settings or via `OPENROUTER_MODEL`.
+**One persona, a small ensemble (v1.1.0)**: the conversation is owned by the
+Host brain; it may hand narrow mechanical tasks to silent **sub-agents** (the
+`delegate` skill on Groq) and an **overflow** rung (`gemini:`/`groq:` entries
+in `MODEL_PRIORITY`, running the same Host prompt verbatim) can carry the chat
+through an OpenRouter outage. The user never sees the seams — no narrated
+switches, no model names, the butler stays the butler.
+**Cloud path**: OpenRouter function-calling over every skill. Keys live **only in
+`.env`** (`OPENROUTER_KEY_n`, `GROQ_KEY_n`, `GEMINI_KEY_n`) — never in the
+settings store, never displayed beyond counts, never logged. The hub rotates
+round-robin per provider ring with automatic failover (401/402/403 dead-skip
+~30 min, 429/5xx soft-skip ~5 min); boot refuses to start only if *no* provider
+has any key. Moving DOWN the cloud ladder — even across providers — always
+asks first, once per outage. Model override in Settings or via
+`OPENROUTER_MODEL`.
 **Local path**: settings → Brain → “Local only” routes chat through Ollama
 WITH the same tool-calling the cloud brain gets. URL/model live in
 **Settings → Local Brain (Ollama)** (env overrides: `OLLAMA_URL`, `OLLAMA_MODEL`;

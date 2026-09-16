@@ -63,7 +63,7 @@ const inlineScript = (file) => {
   const byName = Object.fromEntries((dg.checks || []).map((c) => [c.name, c]));
   ok('diagnostics: readiness report live — 9 checks (incl. v1.0.7 rotation preflight + v1.0.8 audit log), registry 26/26, zero failures, honest warns on key-less cloud + keyless override',
     dg.ok === true && dg.summary && dg.summary.total === 9 && dg.summary.fails === 0
-      && byName['skills registry'] && byName['skills registry'].ok === 'ok' && byName['skills registry'].detail === '26/26 skills loaded'
+      && byName['skills registry'] && byName['skills registry'].ok === 'ok' && byName['skills registry'].detail === '27/27 skills loaded'
       && byName['cloud brain (OpenRouter)'] && byName['cloud brain (OpenRouter)'].ok === 'warn' && /no keys/.test(byName['cloud brain (OpenRouter)'].detail || '')
       && byName['cloud brain key rotation'] && /KEYLESS OVERRIDE|3\/3 slots/.test(byName['cloud brain key rotation'].detail || ''));
   const srvSrc = fs.readFileSync(path.join(__dirname, '..', 'hub', 'server.js'), 'utf8');

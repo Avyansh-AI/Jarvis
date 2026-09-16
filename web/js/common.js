@@ -43,8 +43,7 @@ window.Jarvis = (() => {
   function loadVoices() { voices = ('speechSynthesis' in window && window.speechSynthesis) ? window.speechSynthesis.getVoices() : []; }
   if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
 
-  function speak(text, { onstart, onend, pacing } = {}) {
-    if (!('speechSynthesis' in window) || LS.get('textOnly', false)) { onstart && onstart(); onend && onend(); return; }
+  function _browserSpeak(text, { onstart, onend, pacing } = {}) {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     const wanted = LS.get('voice', '');
@@ -60,7 +59,41 @@ window.Jarvis = (() => {
     u.onerror = () => onend && onend();
     speechSynthesis.speak(u);
   }
-  function stopSpeaking() { if ('speechSynthesis' in window) speechSynthesis.cancel(); }
+  /* v1.1.0 server-side voice: when the device toggle is on, replies are rendered
+     by the hub (/api/tts) and played as audio. ANY failure — offline hub, no
+     TTS_MODEL, bad network — drops to the browser voices for that utterance and
+     latches off for the page so repeat failures never add latency. Barge-in
+     (stopSpeaking) cancels both paths. Text-only mode still wins over everything. */
+  let _srvAudio = null, _srvCtl = null, _srvOk = null; // null = not yet tried
+  function _srvSpeak(text) {
+    if (_srvCtl) { try { _srvCtl.abort(); } catch {} }
+    _srvCtl = new AbortController();
+    return fetch('/api/tts' + qs('/api/tts'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }), signal: _srvCtl.signal,
+    }).then((r) => { if (!r.ok) throw new Error('tts ' + r.status); return r.blob(); })
+      .then((b) => new Audio(URL.createObjectURL(b)));
+  }
+  function speak(text, { onstart, onend, pacing } = {}) {
+    if (!('speechSynthesis' in window) || LS.get('textOnly', false)) { onstart && onstart(); onend && onend(); return; }
+    if (LS.get('serverTts', false) && _srvOk !== false) {
+      _srvSpeak(text).then((audio) => {
+        _srvOk = true;
+        _srvAudio = audio;
+        audio.onended = () => { try { URL.revokeObjectURL(audio.src); } catch {} if (_srvAudio === audio) _srvAudio = null; onend && onend(); };
+        onstart && onstart();
+        const pr = audio.play();
+        if (pr && pr.catch) pr.catch(() => { if (_srvAudio === audio) _srvAudio = null; onend && onend(); });
+      }).catch(() => { _srvOk = false; _browserSpeak(text, { onstart, onend, pacing }); });
+      return;
+    }
+    _browserSpeak(text, { onstart, onend, pacing });
+  }
+  function stopSpeaking() {
+    if (_srvCtl) { try { _srvCtl.abort(); } catch {} _srvCtl = null; }
+    if (_srvAudio) { try { _srvAudio.pause(); URL.revokeObjectURL(_srvAudio.src); } catch {} _srvAudio = null; }
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
+  }
 
   async function notify(title, body) {
     if (LS.get('notifications', false) && 'Notification' in window) {

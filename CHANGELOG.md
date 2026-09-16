@@ -4,6 +4,55 @@
 > under the original product name **MAX AI**; this fork continues as **Jarvis**
 > from v1.0.0 onward. History below the v1.0.0 entry is inherited verbatim.
 
+## v1.1.0 — Multi-brain: Host + silent sub-agents + overflow fallback + server voice (2026-09-16)
+
+The owner's delivered architecture is now the product: one persona, a small
+ensemble behind it. **Host** (OpenRouter rung) owns every conversation; the new
+`delegate` skill lets it hand ONE narrow mechanical task at a time to a silent
+**sub-agent** on Groq (results integrated by the Host — the staff is never
+mentioned); any `groq:`/`gemini:` rung in `MODEL_PRIORITY` can carry the chat as
+**overflow**, running the Host prompt verbatim so the switch is invisible.
+**Server voice**: `POST /api/tts` synthesizes replies (Orpheus-class model on
+Groq, `TTS_MODEL`/`TTS_VOICE` in `.env`); the web client prefers it per-device
+(new Settings switch) and falls back to browser voices on ANY failure —
+barge-in cancels both paths, text-only mode still wins over everything.
+
+**Keys & gates:** `.env`-only policy unchanged and now generalized —
+`GROQ_KEY_1..n` and `GEMINI_KEY_1..n` slots beside `OPENROUTER_KEY_n`, gap-
+tolerant, no UI editing anywhere (Settings grows a READ-ONLY brains line:
+counts only, same masking doctrine). The boot gate refuses to start only when
+NO sanctioned provider has any key (naming OPENROUTER_KEY_1..3); a partial
+OpenRouter ring boots with a loud warning naming the empty slot, since overflow
+keys carry the fallback. `JARVIS_ALLOW_KEYLESS=1` override behaves as before.
+
+**Prompt discipline:** the system prompt teaches ensemble invisibility — present
+results as your own; never name models/providers/key counts (unless the owner
+is debugging the hub directly); never reference or apologize for a fallback
+switch. Degrading down the cloud ladder now asks for confirmation even when the
+provider changes (was OpenRouter-only); the ollama floor stays exempt.
+
+**Test re-pins (flagged, not silent — owner's architecture supersedes v1.0.7
+single-provider doctrine):** J16 partial-rotation `exit(1)` → loud-warn-then-boot
+with a new zero-keys-must-still-refuse case; test-features #15 provider hygiene
+"no Gemini strings in hub code" → sanctioned-origin allow-set (openrouter.ai,
+api.groq.com, generativelanguage.googleapis.com, loopback) + no-key-literals
+assertion kept; J12 skill count 26 → 27 (delegate); test-systems diag
+`26/26 skills loaded` → 27/27. No existing check was weakened or removed —
+each pin moved only where the delivered architecture required it. New coverage:
+J17 (multi-brain keyring arithmetic, invisibility clauses, sub-agent prompt
+discipline, TTS never persists spoken text), test-features #19 (delegate
+happy-path against a mock Groq with Bearer/temperature assertions, /api/tts
+503 + live-hub byte passthrough, health provider-count surface, Settings
+read-only surface), test-modelroute +6 (provider prefixes, per-provider key
+gating, cross-provider degrade, base resolution).
+
+**Housekeeping:** `.env.example` documents all three providers + TTS/SUBAGENT
+vars, and its example OpenRouter lines became commented placeholders (they sat
+in a PUBLIC repo in real key shape — if any were ever real, rotate them); the
+v1.0.7 note "there is no separate Gemini provider" is replaced by the prefix
+syntax. Voice verification, security gates, AES-256-GCM stores, injection
+containment and the audit chain are untouched.
+
 ## v1.0.12 — Owner persona adopted: the JARVIS voice is now a British butler (2026-09-16)
 
 The owner-supplied personality spec is folded into `hub/persona.js` at the
