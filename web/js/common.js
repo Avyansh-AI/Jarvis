@@ -64,35 +64,57 @@ window.Jarvis = (() => {
      TTS_MODEL, bad network — drops to the browser voices for that utterance and
      latches off for the page so repeat failures never add latency. Barge-in
      (stopSpeaking) cancels both paths. Text-only mode still wins over everything. */
-  let _srvAudio = null, _srvCtl = null, _srvOk = null; // null = not yet tried
+  let _srvAudio = null, _srvCtl = null, _srvOk = null, _srvEnd = null, _srvToken = 0, _srvCanceled = false;
+  /* One utterance at a time — barge-in CANCELS, never stacks. _srvCanceled marks
+     deliberate aborts (stop/new speak) so the in-flight catch can tell a
+     cancellation from a real hub failure: a cancel settles the caller's onend
+     without re-speaking and without latching server voice off; a timeout or a
+     5xx still degrades to browser voices (and latches, as before). The token
+     makes late resolutions of superseded requests no-ops (revoked, settled). */
+  function _srvHalt() {
+    _srvToken++;
+    if (_srvCtl) { _srvCanceled = true; try { _srvCtl.abort(); } catch {} _srvCtl = null; }
+    let f = null;
+    if (_srvAudio) { try { _srvAudio.onended = null; _srvAudio.pause(); URL.revokeObjectURL(_srvAudio.src); } catch {} _srvAudio = null; f = _srvEnd; }
+    _srvEnd = null;
+    return f;
+  }
   function _srvSpeak(text) {
-    if (_srvCtl) { try { _srvCtl.abort(); } catch {} }
+    const token = ++_srvToken;
     _srvCtl = new AbortController();
+    const ctl = _srvCtl;
     return fetch('/api/tts' + qs('/api/tts'), {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text }), signal: _srvCtl.signal,
+      body: JSON.stringify({ text }), signal: ctl.signal,
     }).then((r) => { if (!r.ok) throw new Error('tts ' + r.status); return r.blob(); })
-      .then((b) => new Audio(URL.createObjectURL(b)));
+      .then((b) => ({ audio: new Audio(URL.createObjectURL(b)), token }));
   }
   function speak(text, { onstart, onend, pacing } = {}) {
+    const f0 = _srvHalt(); // any new utterance (either engine) stops the live server stream first
+    if (f0) { try { f0(); } catch {} }
     if (!('speechSynthesis' in window) || LS.get('textOnly', false)) { onstart && onstart(); onend && onend(); return; }
     if (LS.get('serverTts', false) && _srvOk !== false) {
-      _srvSpeak(text).then((audio) => {
+      _srvSpeak(text).then(({ audio, token }) => {
+        if (token !== _srvToken) { try { URL.revokeObjectURL(audio.src); } catch {} onend && onend(); return; }
         _srvOk = true;
         _srvAudio = audio;
-        audio.onended = () => { try { URL.revokeObjectURL(audio.src); } catch {} if (_srvAudio === audio) _srvAudio = null; onend && onend(); };
+        _srvEnd = onend;
+        audio.onended = () => { try { URL.revokeObjectURL(audio.src); } catch {} if (_srvAudio === audio) { _srvAudio = null; _srvEnd = null; } onend && onend(); };
         onstart && onstart();
         const pr = audio.play();
-        if (pr && pr.catch) pr.catch(() => { if (_srvAudio === audio) _srvAudio = null; onend && onend(); });
-      }).catch(() => { _srvOk = false; _browserSpeak(text, { onstart, onend, pacing }); });
+        if (pr && pr.catch) pr.catch(() => { if (token === _srvToken && _srvAudio === audio) { _srvAudio = null; _srvEnd = null; onend && onend(); } });
+      }).catch(() => {
+        if (_srvCanceled) { _srvCanceled = false; onend && onend(); return; } // cancelled — settle the caller, stay silent, don't latch
+        _srvOk = false; _browserSpeak(text, { onstart, onend, pacing });
+      });
       return;
     }
     _browserSpeak(text, { onstart, onend, pacing });
   }
   function stopSpeaking() {
-    if (_srvCtl) { try { _srvCtl.abort(); } catch {} _srvCtl = null; }
-    if (_srvAudio) { try { _srvAudio.pause(); URL.revokeObjectURL(_srvAudio.src); } catch {} _srvAudio = null; }
+    const f = _srvHalt();
     if ('speechSynthesis' in window) speechSynthesis.cancel();
+    if (f) { try { f(); } catch {} }
   }
 
   async function notify(title, body) {

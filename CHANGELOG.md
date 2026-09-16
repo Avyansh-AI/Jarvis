@@ -46,6 +46,22 @@ happy-path against a mock Groq with Bearer/temperature assertions, /api/tts
 read-only surface), test-modelroute +6 (provider prefixes, per-provider key
 gating, cross-provider degrade, base resolution).
 
+**Debug pass (same-day, folded into this unreleased entry):** two overlap
+defects found and fixed in the new surface. The web voice client treated a
+barge-in/stop ABORT of an in-flight `/api/tts` request as an engine failure —
+it re-spoke the cancelled text through browser voices, latched server voice
+off for the page, left a playing stream running under the next one (two audio
+streams overlapping), and stranded callers whose `onend` never fired (stuck
+briefing button). Now: a generation token + explicit cancel flag distinguish
+cancellation from failure; every `speak()` halts the live server stream first
+(one utterance at a time, cancel-don't-stack); superseded late resolves are
+revoked and settled; genuine timeouts/5xx still degrade to device voices
+exactly as before. Server side: the overflow ring cache compared ONE shared
+signature across providers, so alternating groq/gemini rungs rebuilt each
+other's KeyRing on every call — soft/hard key cooldowns never survived;
+signatures are now tracked per provider (plus a dead `return` removed). Two
+regression checks added (test-features, J17); suite now 696 checks green.
+
 **Housekeeping:** `.env.example` documents all three providers + TTS/SUBAGENT
 vars, and its example OpenRouter lines became commented placeholders (they sat
 in a PUBLIC repo in real key shape — if any were ever real, rotate them); the

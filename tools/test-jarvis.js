@@ -226,6 +226,9 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
     /You are NOT the user-facing personality/.test(dlgSrc) && /Skip greetings, sign-offs, and pleasantries entirely/.test(dlgSrc));
   ok('J17: delegate results reach the Host as text only — no say/cards/broadcast path to the user',
     !/say\s*:|cards\s*:/.test(dlgSrc) && !/broadcast|bus\.emit/.test(dlgSrc));
+  ok('J17: overflow ring cache keyed per provider — alternating groq/gemini calls cannot rebuild one another\'s ring (cooldowns survive)',
+    /__ringsSigs\[provider\] !== sig/.test(orchSrc) && /__ringsSigs\[provider\] = sig/.test(orchSrc)
+      && !/return this\.__rings\[provider\];\s*\n\s*return this\.__ring;/.test(orchSrc));
   ok('J17: TTS persists no spoken text — hub events carry byte counts only',
     /log\.write\('tts', \{ ok: true, bytes: buf\.length \}\)/.test(read('hub/server.js')) && !/log\.write\('tts',[^}]*text/.test(read('hub/server.js')));
 }

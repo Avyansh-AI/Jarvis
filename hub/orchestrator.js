@@ -255,12 +255,12 @@ class Orchestrator {
     const eff = prefix ? loadKeysFor(prefix, process.env) : [];
     const sig = provider + '|' + eff.join('|');
     this.__rings = this.__rings || {};
-    if (!this.__rings[provider] || this.__ringsSig !== sig) {
+    this.__ringsSigs = this.__ringsSigs || {}; // per provider — a gemini call must never rebuild (and cool-wipe) the groq ring
+    if (!this.__rings[provider] || this.__ringsSigs[provider] !== sig) {
       this.__rings[provider] = new KeyRing(eff);
-      this.__ringsSig = sig;
+      this.__ringsSigs[provider] = sig;
     }
     return this.__rings[provider];
-    return this.__ring;
   }
 
   keyStatus() { return this._ring().status(); }

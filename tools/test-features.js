@@ -411,6 +411,10 @@ const ok = (n, c) => { if (c) { pass++; console.log('ok  ' + n); } else { fail++
     const cjs = fs.readFileSync(path.join(ROOT, 'web', 'js', 'common.js'), 'utf8');
     ok('voice client: server TTS attempted first with browser fallback + barge-in cancels BOTH paths',
       cjs.includes('/api/tts') && cjs.includes('_srvOk = false; _browserSpeak') && cjs.includes('_srvAudio.pause()'));
+    ok('voice client overlap: cancellation ≠ failure — barge-in/stop never re-speaks the cancelled text, never latches the engine off, kills the playing stream, and superseded late resolves are revoked + settled',
+      /_srvCanceled = true/.test(cjs) && /if \(_srvCanceled\) \{ _srvCanceled = false; onend && onend\(\); return; \}/.test(cjs)
+        && /onended = null; _srvAudio\.pause\(\)/.test(cjs) && /token !== _srvToken/.test(cjs)
+        && /pr\.catch\(\(\) => \{ if \(token === _srvToken/.test(cjs));
 
     // second, TTS-live hub against a mock speech engine — proves the real route + ring
     const audioMock = createServer((req, res) => {
