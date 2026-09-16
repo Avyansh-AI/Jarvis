@@ -43,7 +43,18 @@ module.exports = {
 **Return values**: `{ say: string }` at minimum. Optional fields:
 `cards: [{ title, lines, source }]` (rich UI citations), `data` (arbitrary,
 forwarded to the client), `task: { step, ...data }` (start a multi-turn task),
-`verify: true` (ask the client to voice-verify first), `error: true`.
+`verify: true` (ask the client to voice-verify first), `error: true`, and
+`long: true` — mark a read-aloud answer meant to be **barge-in-able**
+(briefings, summaries: while it speaks, a fresh wake word or submitted
+command cancels the TTS mid-speech). Keep it off short replies; the web client
+never arms the interrupt window without the flag, and SOS/alert audio is
+never voice-interrupted.
+
+**Capability line (optional)**: export a *sync* `status: () => 'one-liner'`
+to show live capability state (e.g. which OS backends are present) as a small
+desc under your skill in Settings → Skills. Read-only and cheap — the
+`/api/health` probe calls it too; async `status()` is deliberately NOT picked
+up by that surface (network calls there would fire per health poll).
 
 **Multi-turn tasks**: return `task` from any handler, then implement
 

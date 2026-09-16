@@ -96,12 +96,18 @@ change it in Settings → Hub timezone (applies instantly, no restart).
 ## Feature modules (all optional, all through the existing dispatcher)
 
 New skills: `desktop` (jailed files; **voice-verify on every call**),
-`browse` (SSRF-guarded, read-only, untrusted), `create` (PDF built-in +
-docx/pptx via optional python3 libs + websites at `/sites/«slug»/`),
-`flights`, `youtube`, `discord`, `terminal`. Plus: **Jarvis Remote** (PIN +
-activity feed + home panel), **meeting assistant** (`meeting.html`),
-attention monitor (`POST /api/attn`), startup briefing (opt-in), one-shot
-screen reading (off by default).
+`browse` (SSRF-guarded, read-only, untrusted), `create` (PDF built-in; Word
+`.docx` / PowerPoint `.pptx` via optional python packages with cross-platform
+interpreter detection (`python3` → `python` → `py -3`) and **honest fallbacks**
+(Markdown / HTML deck + the exact `pip install` to fix it — never a silent
+failure; also voice-native: “make a word document about …”, “make a
+presentation about …”; live backend status shows under Settings → Skills);
+websites at `/sites/«slug»/`), `flights`, `youtube`, `discord`, `terminal`.
+Plus: **Jarvis Remote** (PIN + activity feed + home panel), **meeting
+assistant** (`meeting.html`), attention monitor (`POST /api/attn`), startup
+briefing (opt-in; **barge-in**: a new command interrupts briefing audio
+mid-speech, and the Remote’s briefing button doubles as tap-to-stop),
+one-shot screen reading (off by default).
 
 **Free vs. signup (no paid or additional *LLM* key anywhere):** weather
 (Open-Meteo), flights-overhead (OpenSky anonymous), YouTube info (oEmbed),
@@ -209,6 +215,16 @@ is exercised by real tests (`tools/test-backup.js`), not just assumed.
 - **Vision**: off by default (privacy). The Vision page shows a one-tap
   **Enable vision** button; camera errors now spell out the cause
   (blocked / busy / missing / insecure-context).
+- **Quiet start on Windows (no console window)** — double-click
+  `scripts/windows/start-jarvis-quiet.vbs`: starts the same `node hub/server.js`
+  entry invisibly and exits; a second run while the hub is up is a no-op (it
+  probes `/api/health` first, so no duplicate servers). To run at login:
+  Win+R → `shell:startup` → drop a shortcut to the file. Want a tray menu
+  (status / open pages / start-stop)? `powershell -WindowStyle Hidden -File
+  scripts\windows\jarvis-tray.ps1` — “Stop” only kills the PID the tray started,
+  never a broad `taskkill`. These launchers carry no config and no credentials:
+  port/keys/tokens stay in `.env` + Settings, and the LAN-auth advice in
+  SECURITY.md applies exactly as before.
 - **Apps skill** 🖥 — “open Chrome”, “close VS Code”, “what apps are running”
   work on Windows (`start`/`taskkill`/`tasklist`), macOS (`open -a`/AppleScript
   quit), and Linux (`which`+detach/`pkill`/`ps`). Names are sanitized (no
@@ -272,15 +288,22 @@ re-checks every module, auto-rolls-back on failure. `data/` is never touched.
 
 ## Tests
 
-`npm test` runs the full suite — **284 checks across 14 suites**, all
-offline (temp data dirs, mocked LLM/HA, simulated satellites):
-`check` (smoke) + `test-hl`, `test-apps`, `test-keyring`, `test-security`
-(auth/gates/redaction), `test-offline`, `test-backup` (real restore),
-`test-redteam` (29 live attacks), `test-chaos` (39 failure injections),
-`test-privacy` (governance APIs), `test-injection` (hostile LLM),
+`npm test` runs the full suite — **661 checks across 24 suites** (plus the
+`test-keyring` rotation PASS), all offline (temp data dirs, mocked
+LLM/HA/satellites; connectivity probes pinned to local mocks, so results
+never depend on WAN luck):
+`check` (module-load smoke) + `test-hl`, `test-apps`, `test-keyring`,
+`test-security` (auth/gates/redaction), `test-offline`, `test-backup` (real
+restore), `test-redteam` (29 live attacks), `test-chaos` (39 failure
+injections), `test-privacy` (governance APIs), `test-injection` (hostile LLM),
 `test-physical` (mutual auth, integrity, attack surface), `test-systems`
-(blocker layer) and `test-features` (v0.9.0 feature pass + regressions).
-`tools/load.js` and `tools/test-scale.js` are manual performance harnesses.
+(blocker layer), `test-features` (feature pass + regressions — incl. the
+Windows launcher, office-generation degradation matrix and briefing barge-in),
+`test-lean`, `test-learn-models`, `test-diagnose`, `test-modelroute`,
+`test-persona`, `test-openers`, `test-regress`, `test-github`, `test-seams`
+and `test-jarvis` (fork invariants).
+`tools/load.js`, `tools/ws-test.js` and `tools/test-scale.js` are manual
+performance harnesses.
 
 ## Project status vs. the master spec
 

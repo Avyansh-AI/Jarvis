@@ -4,6 +4,67 @@
 > under the original product name **MAX AI**; this fork continues as **Jarvis**
 > from v1.0.0 onward. History below the v1.0.0 entry is inherited verbatim.
 
+## v1.0.11 — Brahma-Lite cherry-picks: quiet Windows launch, office-generation depth, barge-in briefings + repo restoration (2026-09-16)
+
+Selected parity work from the smaller Brahma AI - Lite desktop assistant —
+nothing ported that Jarvis already does better (routing, plugin system,
+browser, gestures all stay as-is); no security gate, encryption or audit path
+was touched. Plus one required housekeeping restoration (see "Tree restored"
+below). 24 suites green: **661 checks + keyring PASS** (was 637).
+
+**Tree restored (repo-critical fix):** the GitHub "Add files via upload"
+import had flattened the tree into the root — `package.json`, `tools/`,
+`hub/skills/` and every `../hub//../web/` require were dead paths and
+`npm test` couldn't start. All files git-mv'd back to the layout pinned by
+`integrity.sh` + `test-jarvis` J12 (`hub/ hub/skills/ tools/ web/ scripts/
+docs/ satellite/esp32/`), and committed local state (`.master.key`,
+`settings.enc*.json`) was **untracked into gitignored `data/`** per the
+repo's own "never commit" convention — rotate that key if the public repo
+existed with it tracked. Three environment/harness bugs surfaced while
+re-greening: `tools/check.js` now mirrors the suites' boot boilerplate
+(`JARVIS_ALLOW_KEYLESS=1` + isolated port; J16's standalone preflight
+unaffected); the dev-sandbox spawned `node` with `env:{}` — PATH-blind outside
+apt installs (`process.execPath` now, flags unchanged); `test-keyring` pins its
+probe to its own mock (established test-chaos pattern).
+
+**1 · Quiet native launcher (Brahma's `start_brahma.vbs`, elevated):**
+`scripts/windows/start-jarvis-quiet.vbs` — double-click starts
+`node hub/server.js` **with no console window**, then exits; it probes
+`/api/health` on 127.0.0.1 first so a second run is a no-op (never a
+duplicate server). Optional `scripts/windows/jarvis-tray.ps1` — zero-dep
+WinForms tray: live status (same health fields), open app/Remote/Settings,
+quiet start, and a **PID-scoped stop** (only kills the process it launched —
+no broad `taskkill`). Both are launcher/control only: no config surface, no
+credentials, same security posture. Pinned by 7 new launcher checks (health
+shape proven live). *(test-features #16)*
+
+**2 · Office-document generation depth (`hub/skills/create.js`):** interpreter
+discovery now spans `python3` → `python` → `py -3` — each **validated by
+running it**, so the Windows Store alias stub can't hijack generation — with a
+documented `MAX_PY_CREATE` test/dev hook. Degradation is now *typed*: no
+python vs. missing lib vs. generator crash vs. clean-but-empty generator, each
+naming the exact fix (`pip install python-docx|python-pptx` — module ≠ pip
+name) while the fallback file (Markdown / HTML deck) still ships: **no silent
+failure on any branch**. Word + decks became first-class **voice requests**
+(offline-capable intents sharing one render path with the LLM tools), and a
+live capability line surfaces in **Settings → Skills** (registry `describe()`
++ escaped render). Registry hardening found by the new tests and pinned:
+`describe()` must call **sync** `status()` only — skills like `github` expose
+an async `status()` that hits the live API for their confirm flow; a read-only
+Settings/health poll must never trigger that. *(test-features #17, 11 checks —
+a stub interpreter drives all five branches deterministically)*
+
+**3 · Interruption-aware briefing playback (Brahma's barge-in):** the
+briefing's `long: true` now reaches the client as a real signal. While a
+long-form answer speaks, a fresh **wake word interrupts the TTS mid-speech**
+and drops straight into capture — even if the mic path then fails (stop-first,
+so a briefing can't keep talking); any submitted command (incl. text box) also
+cancels current playback. Short replies are deliberately *not*
+interrupt-armed (self-echo guard) and SOS/alert audio stays tap-only.
+Jarvis Remote's briefing button became a live tap-to-stop. Documented as a
+skill-contract field in `docs/ADDING_A_SKILL.md`. *(test-features #18, 6
+checks incl. the hub passthrough)*
+
 ## v1.0.10 — Self-review regression pass: treat the last three passes as unverified (2026-09-04)
 
 Lockstep across both products (same diffs, both suites run in both repos).
