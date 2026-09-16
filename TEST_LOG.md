@@ -227,7 +227,7 @@ local state (`.master.key`, `settings.enc*.json`) untracked into gitignored
 `data/` (rotate the key if the public repo existed while tracked).
 Re-greening surfaced three harness/portability bugs, each fixed at the root,
 none weakening a gate: check.js now mirrors the suites' boot boilerplate
-(JARVIS_OVERRIDE var + isolated port; standalone preflight J16 untouched);
+(JARVIS_ALLOW_KEYLESS=1 test/CI override + isolated port; standalone preflight J16 untouched);
 dev-sandbox node spawn uses `process.execPath` (PATH-blind `env:{}` failed on
 non-apt installs — sandbox flags unchanged); test-keyring pins its probe to
 its own mock (test-chaos pattern). Baseline after restoration: **24 suites,
